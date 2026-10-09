@@ -13,7 +13,7 @@ import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { ModelLogo } from "@/components/model-logo";
 import { ModelTags } from "@/components/model-tags";
-import { quoteModel, type LogicalModelQuote } from "@/services/api/logical-models";
+import { quoteModel, type LogicalModelQuote, type PublicChannelModelAvailability } from "@/services/api/logical-models";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -54,42 +54,8 @@ export function ModelPicker({
     const rawTheme = useActiveTheme();
     const theme = (canvasThemes[rawTheme as keyof typeof canvasThemes] ?? canvasThemes.dark) as CanvasTheme;
     const [open, setOpen] = useState(false);
+    const [availableHeight, setAvailableHeight] = useState(0);
     const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
-    const [triggerWidth, setTriggerWidth] = useState<number | null>(null);
-    const [menuMaxHeight, setMenuMaxHeight] = useState<number | null>(null);
-
-    // 创作页组合器贴近视口底部时 antd 会把浮层翻到触发器上方并整体推出屏幕，
-    // 表现成“模型框点不动”。这里按触发器上下可用空间限制菜单高度，保证菜单始终完整可见。
-    const syncMenuMaxHeight = () => {
-        const trigger = triggerRef.current;
-        if (!trigger) return;
-        const rect = trigger.getBoundingClientRect();
-        const gutter = 16;
-        const spaceAbove = rect.top - gutter;
-        const spaceBelow = window.innerHeight - rect.bottom - gutter;
-        setMenuMaxHeight(Math.round(Math.max(180, Math.min(460, Math.max(spaceAbove, spaceBelow)))));
-    };
-    useLayoutEffect(() => {
-        const trigger = triggerRef.current;
-        if (!trigger) return;
-        const updateTriggerWidth = () => setTriggerWidth(Math.ceil(trigger.getBoundingClientRect().width));
-        updateTriggerWidth();
-        const observer = new ResizeObserver(updateTriggerWidth);
-        observer.observe(trigger);
-        return () => observer.disconnect();
-    }, [className, fullWidth, showSelectedPrice, variant, value]);
-
-    useEffect(() => {
-        if (!open) return;
-        syncMenuMaxHeight();
-        const handleViewportChange = () => syncMenuMaxHeight();
-        window.addEventListener("resize", handleViewportChange);
-        window.addEventListener("scroll", handleViewportChange, true);
-        return () => {
-            window.removeEventListener("resize", handleViewportChange);
-            window.removeEventListener("scroll", handleViewportChange, true);
-        };
-    }, [open]);
     const menuRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const options = useMemo(() => Array.from(new Set(selectableModelsByCapability(config, capability).filter(Boolean))), [capability, config]);
@@ -104,6 +70,21 @@ export function ModelPicker({
     const quoteRequest = useMemo(() => modelQuoteRequest(config, current, capability, requirements), [capability, config, current, requirements]);
     const [routeQuote, setRouteQuote] = useState<LogicalModelQuote | undefined>();
     const creationVariant = variant === "creation";
+
+    useLayoutEffect(() => {
+        if (!open) return;
+        const updateAvailableHeight = () => {
+            const { top, bottom } = triggerRef.current!.getBoundingClientRect();
+            setAvailableHeight(Math.max(top, window.innerHeight - bottom));
+        };
+        updateAvailableHeight();
+        window.addEventListener("resize", updateAvailableHeight);
+        window.addEventListener("scroll", updateAvailableHeight, true);
+        return () => {
+            window.removeEventListener("resize", updateAvailableHeight);
+            window.removeEventListener("scroll", updateAvailableHeight, true);
+        };
+    }, [open]);
 
     useEffect(() => {
         if (!showSelectedPrice || !creditsEnabled || !quoteRequest) {
@@ -144,7 +125,6 @@ export function ModelPicker({
     const setPickerOpen = (nextOpen: boolean) => {
         if (nextOpen && !options.length) onMissingConfig?.();
         if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
-        if (nextOpen) syncMenuMaxHeight();
         if (nextOpen) {
             setActiveGroupKey(optionGroups.find((group) => group.models.some((item) => item.models.includes(current)))?.key ?? null);
         }
@@ -152,7 +132,7 @@ export function ModelPicker({
     };
     const focusMenuOption = (last = false) => {
         window.requestAnimationFrame(() => {
-            const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>("[data-model-picker-item]:not(:disabled)");
+            const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>('[data-model-picker-item]:not(:disabled)');
             const target = last ? buttons?.item((buttons?.length || 1) - 1) : buttons?.item(0);
             target?.focus();
         });
@@ -177,7 +157,7 @@ export function ModelPicker({
             return;
         }
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-model-picker-item]:not(:disabled)"));
+        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-model-picker-item]:not(:disabled)'));
         if (!buttons.length) return;
         event.preventDefault();
         const activeIndex = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -188,18 +168,11 @@ export function ModelPicker({
         <div
             ref={menuRef}
             data-canvas-no-zoom
-            className={cn("canvas-model-picker-menu creation-model-picker-menu max-w-[calc(100vw-24px)]", activeGroupKey === null ? "is-brand-list" : "is-model-list")}
-            style={
-                {
-                    background: theme.node.panel,
-                    color: theme.node.text,
-                    "--canvas-model-picker-trigger-width": triggerWidth ? String(triggerWidth) + "px" : undefined,
-                    maxHeight: menuMaxHeight ? String(menuMaxHeight) + "px" : undefined,
-                    // 样式表里 .is-model-list 的 max-height 带 !important，内联值压不过它，
-                    // 所以同时写 CSS 变量，由该规则用 var() 读取。
-                    "--creation-model-picker-menu-max-height": menuMaxHeight ? String(menuMaxHeight) + "px" : undefined,
-                } as CSSProperties
-            }
+            className={cn(
+                "canvas-model-picker-menu creation-model-picker-menu max-w-[calc(100vw-24px)]",
+                activeGroupKey === null ? "is-brand-list" : "is-model-list",
+            )}
+            style={{ background: theme.node.panel, color: theme.node.text, "--canvas-model-picker-available-height": `${availableHeight}px` } as CSSProperties}
             role="listbox"
             aria-label={placeholder}
             onKeyDown={handleMenuKeyDown}
@@ -211,104 +184,66 @@ export function ModelPicker({
                     <div className="canvas-model-picker-brands" aria-label="选择产品模型">
                         {optionGroups.map((group) => {
                             const groupCurrent = group.models.find((item) => item.models.includes(current));
-                            return (
-                                <button
-                                    key={group.key}
-                                    type="button"
-                                    data-model-picker-item
-                                    className={cn("canvas-model-picker-brand", groupCurrent && "is-active")}
-                                    aria-pressed={Boolean(groupCurrent)}
-                                    onClick={() => {
-                                        setActiveGroupKey(group.key);
-                                        focusMenuOption();
-                                    }}
-                                >
-                                    <span className="canvas-model-picker-brand-icon">
-                                        <ModelLogo icon={group.icon} size={22} />
-                                    </span>
-                                    <span className="canvas-model-picker-brand-copy">
-                                        <strong>{group.label}</strong>
-                                        <small>
-                                            {group.models.length} 个{group.kind === "product" ? "渠道" : "模型"}
-                                            {group.scope ? ` · ${group.scope}` : ""}
-                                        </small>
-                                    </span>
-                                    <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
-                                </button>
-                            );
+                            return <button key={group.key} type="button" data-model-picker-item className={cn("canvas-model-picker-brand", groupCurrent && "is-active")} aria-pressed={Boolean(groupCurrent)} onClick={() => { setActiveGroupKey(group.key); focusMenuOption(); }}>
+                                <span className="canvas-model-picker-brand-icon"><ModelLogo icon={group.icon} size={22} /></span>
+                                <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong><small>{group.models.length} 个{group.kind === "product" ? "渠道" : "模型"}{group.scope ? ` · ${group.scope}` : ""}</small></span>
+                                <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
+                            </button>;
                         })}
                     </div>
-                ) : (
-                    <div className="canvas-model-picker-two-pane">
-                        <div className="canvas-model-picker-brand-rail" aria-label="产品模型">
-                            {optionGroups.map((group) => {
+                ) : <div className="canvas-model-picker-two-pane">
+                    <div className="canvas-model-picker-brand-rail" aria-label="产品模型">
+                        {optionGroups.map((group) => {
+                            return <button key={group.key} type="button" className={cn("canvas-model-picker-brand", activeGroupKey === group.key && "is-active")} aria-pressed={activeGroupKey === group.key} onClick={() => setActiveGroupKey(group.key)}>
+                                <span className="canvas-model-picker-brand-icon"><ModelLogo icon={group.icon} size={22} /></span>
+                                <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong><small>{group.models.length} 个{group.kind === "product" ? "渠道" : "模型"}{group.scope ? ` · ${group.scope}` : ""}</small></span>
+                                <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
+                            </button>;
+                        })}
+                    </div>
+                    {optionGroups.filter((group) => group.key === activeGroupKey).map((group) => <section key={group.key} className="canvas-model-picker-group canvas-model-picker-model-pane min-w-0">
+                        <div className="grid min-w-0 gap-1">
+                            {group.models.map((modelGroup) => {
+                                const selected = modelGroup.models.includes(current);
+                                const model = compatibleModelInGroup(config, modelGroup.models, selectionRequirements, selected ? current : undefined);
+                                const displayModel = model || (selected ? current : modelGroup.models[0]);
+                                const disabledReason = model ? "" : modelCompatibilityError(config, modelGroup.models[0], selectionRequirements) || "当前输入不符合该模型能力";
                                 return (
-                                    <button key={group.key} type="button" className={cn("canvas-model-picker-brand", activeGroupKey === group.key && "is-active")} aria-pressed={activeGroupKey === group.key} onClick={() => setActiveGroupKey(group.key)}>
-                                        <span className="canvas-model-picker-brand-icon">
-                                            <ModelLogo icon={group.icon} size={22} />
-                                        </span>
-                                        <span className="canvas-model-picker-brand-copy">
-                                            <strong>{group.label}</strong>
-                                            <small>
-                                                {group.models.length} 个{group.kind === "product" ? "渠道" : "模型"}
-                                                {group.scope ? ` · ${group.scope}` : ""}
-                                            </small>
-                                        </span>
-                                        <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
+                                    <button
+                                        key={modelGroup.key}
+                                        type="button"
+                                        data-model-picker-item
+                                        role="option"
+                                        aria-selected={selected}
+                                        aria-disabled={Boolean(disabledReason)}
+                                        disabled={Boolean(disabledReason)}
+                                        className="canvas-model-picker-option disabled:cursor-not-allowed disabled:opacity-45"
+                                        style={{ background: selected ? theme.toolbar.activeBg : "transparent", color: theme.node.text }}
+                                        onClick={() => {
+                                            if (!model) return;
+                                            onChange(model);
+                                        }}
+                                    >
+                                        <ModelLabel
+                                            config={config}
+                                            model={displayModel}
+                                            capability={capability}
+                                            theme={theme}
+                                            creationVariant
+                                            showConfiguredModelName={showConfiguredModelName}
+                                            label={group.kind === "product" ? modelGroup.label : undefined}
+                                            requirements={requirements}
+                                            showPrice={showOptionPrices && creditsEnabled}
+                                            disabledReason={disabledReason}
+                                            showDescription
+                                        />
+                                        <span className="canvas-model-picker-option-check ml-1 shrink-0" aria-hidden="true">{selected ? <Check className="size-full" style={{ color: theme.node.activeStroke }} /> : null}</span>
                                     </button>
                                 );
                             })}
                         </div>
-                        {optionGroups
-                            .filter((group) => group.key === activeGroupKey)
-                            .map((group) => (
-                                <section key={group.key} className="canvas-model-picker-group canvas-model-picker-model-pane min-w-0 overflow-hidden">
-                                    <div className="grid min-w-0 gap-1">
-                                        {group.models.map((modelGroup) => {
-                                            const selected = modelGroup.models.includes(current);
-                                            const model = compatibleModelInGroup(config, modelGroup.models, selectionRequirements, selected ? current : undefined);
-                                            const displayModel = model || (selected ? current : modelGroup.models[0]);
-                                            const disabledReason = model ? "" : modelCompatibilityError(config, modelGroup.models[0], selectionRequirements) || "当前输入不符合该模型能力";
-                                            return (
-                                                <button
-                                                    key={modelGroup.key}
-                                                    type="button"
-                                                    data-model-picker-item
-                                                    role="option"
-                                                    aria-selected={selected}
-                                                    aria-disabled={Boolean(disabledReason)}
-                                                    disabled={Boolean(disabledReason)}
-                                                    className="canvas-model-picker-option disabled:cursor-not-allowed disabled:opacity-45"
-                                                    style={{ background: selected ? theme.toolbar.activeBg : "transparent", color: theme.node.text }}
-                                                    onClick={() => {
-                                                        if (!model) return;
-                                                        onChange(model);
-                                                    }}
-                                                >
-                                                    <ModelLabel
-                                                        config={config}
-                                                        model={displayModel}
-                                                        capability={capability}
-                                                        theme={theme}
-                                                        creationVariant
-                                                        showConfiguredModelName={showConfiguredModelName}
-                                                        label={group.kind === "product" ? modelGroup.label : undefined}
-                                                        requirements={requirements}
-                                                        showPrice={showOptionPrices && creditsEnabled}
-                                                        disabledReason={disabledReason}
-                                                        showDescription
-                                                    />
-                                                    <span className="canvas-model-picker-option-check ml-1 shrink-0" aria-hidden="true">
-                                                        {selected ? <Check className="size-full" style={{ color: theme.node.activeStroke }} /> : null}
-                                                    </span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </section>
-                            ))}
-                    </div>
-                )
+                    </section>)}
+                </div>
             ) : (
                 <div className="canvas-model-picker-empty" style={{ color: theme.node.muted }}>
                     {emptyModelLabel(config, capability)}
@@ -324,6 +259,7 @@ export function ModelPicker({
                 onOpenChange={setPickerOpen}
                 trigger="click"
                 placement="bottomLeft"
+                align={{ overflow: { adjustY: true, shiftX: true } }}
                 arrow={false}
                 content={content}
                 classNames={{
@@ -341,13 +277,6 @@ export function ModelPicker({
                     aria-label={placeholder}
                     title={current ? pickerModelOptionLabel(config, current, showConfiguredModelName) : placeholder}
                     onKeyDown={handleTriggerKeyDown}
-                    // Keep a direct click path. Ant Design's cloned trigger can
-                    // lose the click when the canvas composer stops pointer
-                    // bubbling for drag prevention.
-                    onClick={() => {
-                        if (!open) setPickerOpen(true);
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
                 >
                     <span className="canvas-model-picker-label flex min-w-0 items-center gap-1.5">
                         <span className="canvas-model-picker-trigger-icon" style={{ background: theme.toolbar.itemHover }}>
@@ -410,15 +339,14 @@ export function ModelLabel({
             </span>
             <span className="min-w-0 flex-1 overflow-hidden">
                 <span className="canvas-model-picker-option-heading">
-                    <span className="canvas-model-picker-option-name text-[var(--fs-label)] font-medium leading-none" title={label || pickerModelDisplayName(config, model, showConfiguredModelName)}>
-                        {label || pickerModelDisplayName(config, model, showConfiguredModelName)}
-                    </span>
+                    <span className="canvas-model-picker-option-name text-[var(--fs-label)] font-medium leading-none" title={label || pickerModelDisplayName(config, model, showConfiguredModelName)}>{label || pickerModelDisplayName(config, model, showConfiguredModelName)}</span>
                     {showPrice ? (
                         <span className="canvas-model-picker-option-price">
                             {/* 候选模型展示自身价目；当前参数的精确报价只在选中后的触发器显示。 */}
                             <ModelPrice price={modelMenuPrice(config, model, capability, true, requirements)} />
                         </span>
                     ) : null}
+                    <ModelAvailabilityBadge availability={modelAvailability(config, model)} available={logicalCost?.available ?? true} showAvailability={channel.scope === "system"} />
                 </span>
                 <span className={cn("canvas-model-picker-description mt-1 block", showDescription && "is-visible")} style={{ color: theme.node.muted }}>
                     {capabilitySummary}
@@ -589,23 +517,68 @@ function ModelPrice({ price, quote, compact = false }: { price: ModelMenuPrice |
         );
     }
     if (price.kind === "estimate") {
-        return (
-            <span className="model-picker-price inline-flex shrink-0 items-center text-[var(--fs-tiny)] font-semibold">
-                <Coins className="model-picker-price-icon" aria-hidden="true" />
-                {price.label || "按量预估"}
-            </span>
-        );
+        return <span className="model-picker-price inline-flex shrink-0 items-center text-[var(--fs-tiny)] font-semibold"><Coins className="model-picker-price-icon" aria-hidden="true" />{price.label || "按量预估"}</span>;
     }
     return (
         <span className="model-picker-price inline-flex shrink-0 items-center gap-1 text-[var(--fs-tiny)] font-bold tabular-nums">
             <Coins className="model-picker-price-icon" aria-hidden="true" />
-            {price.value.toLocaleString("zh-CN", { maximumFractionDigits: compact ? 3 : 6 })}
-            {compact ? "/" : " 积分/"}
-            {price.unit}
+            {price.value.toLocaleString("zh-CN", { maximumFractionDigits: compact ? 3 : 6 })}{compact ? "/" : " 积分/"}{price.unit}
         </span>
     );
 }
 
+function modelAvailability(config: AiConfig, model: string): PublicChannelModelAvailability | undefined {
+    if (!model) return undefined;
+    const channel = resolveModelChannel(config, model);
+    return channel.modelCosts?.find((item) => item.model === modelOptionName(model))?.availability;
+}
+
+function ModelAvailabilityBadge({ availability, available, showAvailability }: { availability?: PublicChannelModelAvailability; available: boolean; showAvailability: boolean }) {
+    if (!showAvailability) return null;
+    const label = availability?.dataState === "ready" && availability.rate24h !== null
+        ? `${Math.round(availability.rate24h * 100)}%`
+        : availability?.dataState === "insufficient"
+            ? "数据不足"
+            : "暂无数据";
+    const trend = availability?.trend7d || [];
+    const trendSamples = trend.reduce((total, item) => total + item.sampleCount, 0);
+    const summary = availability
+        ? `当前${available ? "可用" : "不可用"}；近24小时${label}，样本 ${availability.sampleCount24h} 条`
+        : `当前${available ? "可用" : "不可用"}；历史成功率暂不可用`;
+    const content = availability ? (
+        <div className="model-picker-availability-popover">
+            <div className="model-picker-availability-popover-head">
+                <strong>近24小时成功率</strong>
+                <span>{label}</span>
+            </div>
+            <div className="model-picker-availability-popover-meta">{availability.sampleCount24h} 次 create 尝试 · 7天样本 {trendSamples} 条</div>
+            <div className="model-picker-availability-trend" aria-label="近7天成功率趋势">
+                {trend.map((item) => {
+                    const dayLabel = item.rate === null ? "暂无数据" : `${Math.round(item.rate * 100)}%`;
+                    return <span key={item.day} className={`model-picker-availability-segment is-${item.dataState}`} title={`${item.day}：${dayLabel}，${item.sampleCount} 条`} style={item.rate === null ? undefined : { opacity: 0.35 + item.rate * 0.65 }} />;
+                })}
+            </div>
+            <div className="model-picker-availability-popover-foot">7天分段趋势 · 悬停查看每日样本</div>
+        </div>
+    ) : null;
+    return (
+        <Popover content={content} trigger={["hover", "focus"]} placement="topRight" arrow={false}>
+            <span
+                className={`model-picker-availability is-${availability?.dataState || "unavailable"}`}
+                role="img"
+                tabIndex={0}
+                aria-label={summary}
+                title={summary}
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                <span className="model-picker-availability-dot" aria-hidden="true" />
+                <span className="model-picker-availability-label">近24h {label}</span>
+            </span>
+        </Popover>
+    );
+}
 function modelMenuMeta(model: string, capability?: ModelCapability): { description: string; time?: string } {
     const name = modelOptionName(model).toLowerCase();
     if (capability === "image") {

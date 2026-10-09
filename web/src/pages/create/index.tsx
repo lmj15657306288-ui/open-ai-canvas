@@ -3,7 +3,7 @@ import { App, Spin } from "antd";
 import { Tooltip } from "@/components/ui/base/tooltip";
 import { History, Sparkles, Maximize2, Images, Image as ImageIcon, Megaphone, Clapperboard, ShoppingBag, Store } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate, useSearchParams, useLocation } from "react-router";
 
 import type { AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
 import { generationErrorCode, generationErrorMessage } from "@/lib/generation-error";
@@ -31,7 +31,9 @@ import { buildCreationMentionReferences, expandCreationPrompt, reconcileCreation
 import { creationAttachmentFromAsset, creationAttachmentFromAudio, creationAttachmentFromAudioAsset, creationAttachmentFromDocument, creationAttachmentFromExternalAsset, creationAttachmentFromImage, creationAttachmentFromVideo, creationAttachmentFromVideoAsset, creationAttachmentKind, creationAudioAsset, creationFileAccepted, creationImageAsset, creationMediaAspectRatio, creationUploadAccept, creationVideoAsset, removeCreationAttachment, splitCreationAttachments, type CreationAttachment } from "./creation-assets";
 import { defaultCreationMode, modeLabels, type CreationConversation, type CreationMessage, type CreationMode, type CreationRetryContext, type CreationSettings, type CreationShotRailEntry, type CreationStatus } from "./creation-types";
 import { attachCreationTaskContexts, completedCreationGenerationTask, conversationTimestamp, creationShotRail, creationVideoShotOrdinal, isImageAttachment, isVideoAttachment, materializeCreationTaskResults, newConversation, newMessage, reconcileCreationTaskMessages } from "./creation-conversations";
-import { CreationComposer, CreationEmptySuggest, CreationFeaturedWorks, CreationHistoryDrawer, CreationMessageView, CreationModeTabs, CreationWorkspaceToolbar, creationAssetCategoryLabels } from "./creation-workspace";
+import { CreationComposer, CreationEmptySuggest, CreationHistoryDrawer, CreationMessageView, CreationModeTabs, CreationWorkspaceToolbar, creationAssetCategoryLabels } from "./creation-workspace";
+import { CreationInspirationTunnel } from "./creation-inspiration-tunnel";
+import { declaredInspirationSources } from "@/lib/inspirations/catalog";
 import { CreationAgentEntry } from "./creation-agent-entry";
 import { createCreationSubmitGate } from "./creation-submit-gate";
 import { creationVideoConfig } from "./creation-generation-config";
@@ -94,6 +96,7 @@ export default function CreatePage() {
     const { message: toast, modal } = App.useApp();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const location = useLocation();
     const [openingCanvas, setOpeningCanvas] = useState(false);
     const openingCanvasRef = useRef(false);
     const brandName = useAppearanceStore((state) => state.appearance.brandName);
@@ -465,6 +468,20 @@ export default function CreatePage() {
         next.delete("mode");
         navigate({ search: next.toString() }, { replace: true });
     }, [searchParams]);
+    // 灵感库「用这个创意创作」跳过来时把提示词和类型带上。
+    // 用完立刻清掉路由状态：留着的话，用户前进后退回到这一页会被重复填充一次。
+    const inspirationHandoff = location.state as { inspirationPrompt?: string; inspirationMode?: CreationMode } | null;
+    useEffect(() => {
+        const handoffPrompt = inspirationHandoff?.inspirationPrompt;
+        if (!handoffPrompt) return;
+        setAgentMode(false);
+        if (inspirationHandoff?.inspirationMode) selectMode(inspirationHandoff.inspirationMode);
+        setPrompt(handoffPrompt);
+        navigate(".", { replace: true, state: null });
+        window.requestAnimationFrame(() => composerFocusRef.current?.focus());
+        // selectMode 每次渲染都是新函数，放进依赖会让本效果反复触发；靠 state 置空来收敛即可。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [inspirationHandoff, navigate]);
 
     const setComposerRatio = (value: string) => {
         setRatio(value);
@@ -1280,10 +1297,29 @@ export default function CreatePage() {
                         onOpenLibrary={() => { setAgentMode(false); selectMode("image"); setLibraryOpen(true); }}
                     />
                 </section>
-                <CreationFeaturedWorks
-                    onStartPrompt={(nextMode, nextPrompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(nextPrompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
+                <CreationInspirationTunnel
+                    mode={mode}
+                    onStartPrompt={(nextMode, prompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(prompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
                 />
-            </main>
+                <div className="creation-inspiration-credit">
+                    <details>
+                        <summary>素材来源</summary>
+                        {declaredInspirationSources().map((source) => (
+                            <p key={source.name ?? source.label}>
+                                {source.notice}
+                                {source.repository ? (
+                                    <>
+                                        {" "}
+                                        <a href={source.repository} target="_blank" rel="noreferrer">
+                                            {source.name} · {source.license}
+                                        </a>
+                                    </>
+                                ) : null}
+                            </p>
+                        ))}
+                    </details>
+                </div>
+                </main>
             </> : <div className="creation-thread-workbench">
                 <CreationWorkspaceToolbar onNewConversation={startNewConversation} onOpenHistory={() => setHistoryOpen(true)} shots={videoShots} onJumpToShot={jumpToShot} onContinueCanvas={() => void continueOnCanvas()} openingCanvas={openingCanvas} />
                 <main ref={threadScrollRef} onScroll={handleThreadScroll} className="creation-thread-scroll creation-scrollbar">

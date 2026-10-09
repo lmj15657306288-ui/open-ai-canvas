@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/protocol"
+	"yingce/backend/internal/protocol"
 )
 
 func heyrouteImageAdapter(t *testing.T) protocol.Adapter {

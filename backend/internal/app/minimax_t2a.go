@@ -3,7 +3,7 @@ package app
 import (
 	"errors"
 
-	"infinite-canvas/backend/internal/model"
+	"yingce/backend/internal/model"
 )
 
 // SystemChannelForInterfaceType 查找指定协议（interfaceType）的系统渠道（会解密 API key）。

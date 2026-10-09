@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/tools"
+	"yingce/backend/internal/model"
+	"yingce/backend/internal/tools"
 )
 
 type (
