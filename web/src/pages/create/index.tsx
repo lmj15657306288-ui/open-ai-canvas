@@ -122,6 +122,7 @@ export default function CreatePage() {
     const [hydrated, setHydrated] = useState(false);
     const userId = useUserStore((state) => state.user?.id || null);
     const userSessionHydrated = useUserStore((state) => state.hydrated);
+    const inspirationSourcesVisible = useUserStore((state) => state.features.inspirationSourcesVisible);
     const [conversationScope, setConversationScope] = useState<string | null>(null);
     const [mode, setMode] = useState<CreationMode>(() => initialComposerPreferences.mode || defaultCreationMode);
     const [prompt, setPrompt] = useState("");
@@ -1244,6 +1245,10 @@ export default function CreatePage() {
                     <h1>你想做什么？</h1>
                     <p>选一个任务，按提示填素材和选项，直接出图或出片。</p>
                 </div>
+                <CreationInspirationTunnel
+                    mode={mode}
+                    onStartPrompt={(nextMode, prompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(prompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
+                />
                 <section ref={launchpadRef} className="creation-launchpad" aria-label="开始创作">
                     <div className={cn("creation-composer-stage is-home-mode", agentMode && "is-agent-mode")}>
                         <CreationModeTabs mode={mode} agentActive={agentMode} onAgentSelect={() => setAgentMode(true)} onModeChange={(next) => { setAgentMode(false); selectMode(next); }} />
@@ -1301,7 +1306,7 @@ export default function CreatePage() {
                     mode={mode}
                     onStartPrompt={(nextMode, prompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(prompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
                 />
-                <div className="creation-inspiration-credit">
+                {inspirationSourcesVisible ? <div className="creation-inspiration-credit">
                     <details>
                         <summary>素材来源</summary>
                         {declaredInspirationSources().map((source) => (
@@ -1318,7 +1323,7 @@ export default function CreatePage() {
                             </p>
                         ))}
                     </details>
-                </div>
+                </div> : null}
                 </main>
             </> : <div className="creation-thread-workbench">
                 <CreationWorkspaceToolbar onNewConversation={startNewConversation} onOpenHistory={() => setHistoryOpen(true)} shots={videoShots} onJumpToShot={jumpToShot} onContinueCanvas={() => void continueOnCanvas()} openingCanvas={openingCanvas} />

@@ -22,6 +22,7 @@ const (
 	FeatureFrontendModels        = "frontendModels"
 	FeaturePluginCenter          = "pluginCenter"
 	FeatureSystemPlugins         = "systemPluginsVisibleToUsers"
+	FeatureInspirationSources    = "inspirationSourcesVisible"
 	FeatureTimelineTranscription = "timelineTranscription"
 	FeaturePlaybackTranscoding   = "playbackTranscoding"
 	FeaturePluginUpload          = "pluginUpload"
@@ -37,6 +38,7 @@ type FeatureAvailability struct {
 	PluginCenterEnabled          bool `json:"pluginCenterEnabled"`
 	PluginUploadEnabled          bool `json:"pluginUploadEnabled"`
 	SystemPluginsVisibleToUsers  bool `json:"systemPluginsVisibleToUsers"`
+	InspirationSourcesVisible    bool `json:"inspirationSourcesVisible"`
 	TimelineTranscriptionEnabled bool `json:"timelineTranscriptionEnabled"`
 	PlaybackTranscodingEnabled   bool `json:"playbackTranscodingEnabled"`
 }
@@ -60,6 +62,7 @@ func DefaultFeatureAvailability() FeatureAvailability {
 		PluginCenterEnabled:          true,
 		PluginUploadEnabled:          true,
 		SystemPluginsVisibleToUsers:  true,
+		InspirationSourcesVisible:    true,
 		TimelineTranscriptionEnabled: true,
 		PlaybackTranscodingEnabled:   true,
 	}
@@ -125,6 +128,8 @@ func (s *Service) FeatureEnabled(feature string) (bool, error) {
 		return value.PluginCenterEnabled, nil
 	case FeatureSystemPlugins:
 		return value.SystemPluginsVisibleToUsers, nil
+	case FeatureInspirationSources:
+		return value.InspirationSourcesVisible, nil
 	case FeatureTimelineTranscription:
 		return value.TimelineTranscriptionEnabled, nil
 	case FeaturePlaybackTranscoding:
@@ -159,6 +164,8 @@ func (s *Service) RequireFeature(feature string) error {
 		return kernel.Forbidden("插件中心暂未开放")
 	case FeatureSystemPlugins:
 		return kernel.Forbidden("系统插件暂未向普通用户展示")
+	case FeatureInspirationSources:
+		return kernel.Forbidden("素材来源说明暂未开放")
 	case FeatureTimelineTranscription:
 		return kernel.Forbidden("字幕转写暂未开放")
 	case FeaturePlaybackTranscoding:

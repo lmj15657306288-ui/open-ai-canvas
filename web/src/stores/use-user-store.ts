@@ -35,6 +35,7 @@ export type FeatureAvailability = {
     pluginUploadEnabled: boolean;
     systemPluginsVisibleToUsers: boolean;
     playbackTranscodingEnabled: boolean;
+    inspirationSourcesVisible: boolean;
     configured?: boolean;
     updatedBy?: string;
     updatedAt?: string;
@@ -51,6 +52,7 @@ export const defaultFeatureAvailability: FeatureAvailability = {
     pluginUploadEnabled: true,
     systemPluginsVisibleToUsers: true,
     playbackTranscodingEnabled: true,
+    inspirationSourcesVisible: true,
 };
 
 type UserStore = {
