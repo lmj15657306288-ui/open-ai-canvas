@@ -18876,3 +18876,112 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
     background: color-mix(in srgb, var(--popover-foreground) 10%, var(--popover)) !important;
     color: var(--popover-foreground) !important;
 }
+
+
+/* ===== 首页业务板块宫格 =====
+   按业务场景分组（内容创作/分析洞察/决策参谋/经营增长/自我定位/法务合规/随手一问），
+   点击后切到对应生成模式并填好引导提示词。板块卡片与suggest-card 保持同一视觉层级。 */
+.creation-home .creation-boards {
+    width: min(820px, calc(100% - 28px));
+    margin: 26px auto 0;
+}
+
+.creation-home .creation-boards-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); margin-bottom: 12px; }
+.creation-home .creation-boards-heading h2 { margin: 0; color: var(--creation-text); font-size: var(--fs-body); font-weight: 600; line-height: 1.45; }
+.creation-home .creation-boards-heading p { margin: 0; color: var(--creation-muted); font-size: var(--fs-label); line-height: 1.55; }
+
+.creation-home .creation-board-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.creation-home .creation-board-filters button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border: 1px solid var(--creation-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--creation-muted);
+    font-size: var(--fs-label);
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background var(--motion-state) var(--motion-ease-out), border-color var(--motion-state) var(--motion-ease-out), color var(--motion-state) var(--motion-ease-out);
+}
+.creation-home .creation-board-filters button:hover { border-color: var(--creation-border-strong); color: var(--creation-text); }
+.creation-home .creation-board-filters button:focus-visible { outline: 2px solid var(--creation-accent); outline-offset: 2px; }
+.creation-home .creation-board-filters button[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--creation-accent) 42%, transparent);
+    background: color-mix(in srgb, var(--creation-accent) 12%, transparent);
+    color: var(--creation-text);
+}
+.creation-home .creation-board-filters button span { opacity: .6; font-variant-numeric: tabular-nums; }
+
+.creation-home .creation-board-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+
+.creation-home .creation-board-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 104px;
+    padding: 12px 13px;
+    border: 1px solid var(--creation-border);
+    border-radius: var(--r-lg);
+    background: var(--creation-surface);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: var(--elevation-card);
+    transition: background var(--motion-state) var(--motion-ease-out), border-color var(--motion-state) var(--motion-ease-out), box-shadow var(--motion-state) var(--motion-ease-out), transform var(--motion-state) var(--motion-ease-out);
+}
+.creation-home .creation-board-card:hover { border-color: var(--creation-border-strong); background: var(--creation-surface-hover); box-shadow: var(--elevation-card-hover); }
+.creation-home .creation-board-card:focus-visible { outline: 2px solid var(--creation-accent); outline-offset: 2px; }
+
+.creation-home .creation-board-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--creation-border);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--creation-surface-muted) 68%, transparent);
+    color: var(--creation-muted);
+}
+.creation-home .creation-board-icon svg { width: 16px; height: 16px; stroke-width: 2; }
+.creation-home .creation-board-card:hover .creation-board-icon { border-color: var(--creation-border-strong); color: var(--creation-text); }
+
+.creation-home .creation-board-copy { display: block; min-width: 0; width: 100%; }
+.creation-home .creation-board-copy strong { display: block; color: var(--creation-text); font-size: var(--fs-body); font-weight: 600; line-height: 1.45; }
+.creation-home .creation-board-copy span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-top: 2px;
+    color: var(--creation-muted);
+    font-size: var(--fs-label);
+    line-height: 1.55;
+}
+
+/* 调度档位标签：实时 / 技能增强 / 深度任务，以及需参考素材的例外态。 */
+.creation-home .creation-board-lane {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: auto;
+    color: var(--creation-muted);
+    font-size: var(--fs-label);
+    line-height: 1.4;
+    opacity: .85;
+}
+.creation-home .creation-board-lane::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.creation-home .creation-board-lane.is-deep { color: color-mix(in srgb, var(--creation-accent) 72%, var(--creation-muted)); }
+
+@media (max-width: 800px) {
+    .creation-home .creation-board-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .creation-home .creation-boards-heading { flex-direction: column; align-items: flex-start; gap: 2px; }
+}
+
+@media (max-width: 520px) {
+    .creation-home .creation-board-grid { grid-template-columns: 1fr; }
+}
+

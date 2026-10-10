@@ -41,6 +41,7 @@ import { CreationLoginDialog } from "./creation-login-dialog";
 import { CREATIVE_SCENARIOS, type CreativeScenarioId } from "@/lib/creation/creative-scenarios";
 import { CreationTaskPanel } from "./creation-task-panel";
 import { buildCreationTaskPrompt, CREATION_TASKS, creationTask, defaultModuleSelection, selectedModuleSummary, type CreationTaskModuleSelection } from "./creation-task-catalog";
+import { CreationBoards } from "./creation-boards-grid";
 
 const AssetLibraryPickerModal = lazy(() => import("@/components/assets/asset-library-picker-modal").then((module) => ({ default: module.AssetLibraryPickerModal })));
 const loadCreationRuntime = () => import("./creation-runtime");
@@ -1296,6 +1297,19 @@ export default function CreatePage() {
                     <CreationEmptySuggest
                         onStartPrompt={(nextMode, nextPrompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(nextPrompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
                         onOpenLibrary={() => { setAgentMode(false); selectMode("image"); setLibraryOpen(true); }}
+                    />
+                    <CreationBoards
+                        brandName={brandName}
+                        onSelect={(board) => {
+                            setAgentMode(false);
+                            selectMode(board.mode);
+                            if (board.needsAsset) {
+                                setLibraryOpen(true);
+                                return;
+                            }
+                            setPrompt(board.prompt);
+                            window.requestAnimationFrame(() => composerFocusRef.current?.focus());
+                        }}
                     />
                 </section>
                 <CreationInspirationTunnel
