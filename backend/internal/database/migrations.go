@@ -176,8 +176,18 @@ var schemaMigrations = []migration{
 	}},
 	{version: 52, name: "skill_curation", checksum: "sha256:skill-curation-v46-20261005", apply: migrateSkillCuration},
 	{version: 53, name: "skill_curation_roots", checksum: "sha256:skill-curation-roots-v47-20261005", apply: migrateSkillCurationRoots},
-	{version: 54, name: "channel_proxy_url", checksum: "sha256:channel-proxy-url-v48-20261009", apply: func(tx *gorm.DB) error { if !tx.Migrator().HasColumn(&model.ModelChannel{}, "ProxyURL") { return tx.Migrator().AddColumn(&model.ModelChannel{}, "ProxyURL") }; return nil }},
-	{version: 55, name: "banner_sort_order", checksum: "sha256:banner-sort-order-v49-20261010", apply: func(tx *gorm.DB) error { if !tx.Migrator().HasColumn(&model.BannerAnnouncement{}, "SortOrder") { return tx.Migrator().AddColumn(&model.BannerAnnouncement{}, "SortOrder") }; return nil }},
+	{version: 54, name: "channel_proxy_url", checksum: "sha256:channel-proxy-url-v48-20261009", apply: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasColumn(&model.ModelChannel{}, "ProxyURL") {
+			return tx.Migrator().AddColumn(&model.ModelChannel{}, "ProxyURL")
+		}
+		return nil
+	}},
+	{version: 55, name: "banner_sort_order", checksum: "sha256:banner-sort-order-v49-20261010", apply: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasColumn(&model.BannerAnnouncement{}, "SortOrder") {
+			return tx.Migrator().AddColumn(&model.BannerAnnouncement{}, "SortOrder")
+		}
+		return nil
+	}},
 }
 
 func migratePrefixedIDSequenceReconcile(tx *gorm.DB) error {

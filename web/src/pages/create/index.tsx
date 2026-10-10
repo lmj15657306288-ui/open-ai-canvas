@@ -1245,10 +1245,6 @@ export default function CreatePage() {
                     <h1>你想做什么？</h1>
                     <p>选一个任务，按提示填素材和选项，直接出图或出片。</p>
                 </div>
-                <CreationInspirationTunnel
-                    mode={mode}
-                    onStartPrompt={(nextMode, prompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(prompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
-                />
                 <section ref={launchpadRef} className="creation-launchpad" aria-label="开始创作">
                     <div className={cn("creation-composer-stage is-home-mode", agentMode && "is-agent-mode")}>
                         <CreationModeTabs mode={mode} agentActive={agentMode} onAgentSelect={() => setAgentMode(true)} onModeChange={(next) => { setAgentMode(false); selectMode(next); }} />
