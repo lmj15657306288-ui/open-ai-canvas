@@ -2339,7 +2339,7 @@ function EcommerceWorkspace({ scope }: { scope: string }) {
                             </button>
                         ) : !plan && !chosenDirection ? (
                             <div className="commerce-assistant-intro">
-                                <img src="/yoru/yoru-body.png" alt="小夜全身形象" />
+                                <img src="/yoru/yoru-body.webp?v=20261101" alt="小夜全身形象" />
                                 <div>
                                     <strong>Hi, {nickname}~</strong>
                                     <b>我能帮你什么呢？</b>
@@ -2350,7 +2350,7 @@ function EcommerceWorkspace({ scope }: { scope: string }) {
                         {restoring || planningPending || directionsStatus === "loading" ? (
                             <div className="commerce-assistant-progress" role="status">
                                 <span className="commerce-thinking-orbit" aria-hidden="true">
-                                    <img src="/yoru/yoru-body.png" alt="" />
+                                    <img src="/yoru/yoru-body.webp?v=20261101" alt="" />
                                 </span>
                                 <span>{restoring ? "正在恢复项目…" : directionsStatus === "loading" ? "小夜正在分析商品并推荐视觉风格…" : "小夜正在完成视觉策划…"}</span>
                             </div>

@@ -146,7 +146,7 @@ export function CommerceStylePicker({
             <div className="commerce-style-picker">
                 <header className="commerce-style-picker-head">
                     <span className="commerce-style-picker-avatar" aria-hidden="true">
-                        <img src="/yoru/yoru-body.png" alt="" />
+                        <img src="/yoru/yoru-body.webp?v=20261101" alt="" />
                     </span>
                     <div>
                         <small>

@@ -1,0 +1,372 @@
+{
+  "apiVersion": "yingce.plugin/v2",
+  "id": "dacheng-relay",
+  "name": "大橙中转（WAN 3.0 / Seedance 2.5）",
+  "version": "1.0.0",
+  "author": "影策",
+  "description": "大橙中转站 /api/open/v1 异步视频协议：提交任务后用任务 ID 回查状态与成片地址。",
+  "documentation": "# 大橙中转（263281.xyz）\n\n对接大橙开放 API 的异步视频任务：`POST /api/open/v1/videos` 提交，`GET /api/open/v1/videos/{taskId}` 回查，成功后取 `video_url`。\n\n## 协议身份\n\n- 插件 ID：`dacheng-relay`\n- 能力：`video`\n- 默认 Base URL：`https://263281.xyz`\n- 鉴权：`Authorization: Bearer <API Key>`\n\n## 接口\n\n- 创建：`POST /api/open/v1/videos`（JSON）\n- 查询：`GET /api/open/v1/videos/{taskId}`\n- 目录：`GET /api/open/v1/models`（仅用于核对上游模型与价格，不进协议）\n\n## 参数映射\n\n| 画布字段 | 上游字段 | 说明 |\n| --- | --- | --- |\n| `model` | `modelKey` | 渠道模型的 providerModelKey，如 `wan3-0` / `seedance-2-5` |\n| `prompt` | `prompt` | 提示词 |\n| `duration` | `duration` | 秒数；未指定默认 10 |\n| `aspectRatio` | `ratio` | 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / adaptive |\n| `resolution` | `resolution` | 480P / 720P / 1080P（Seedance 2.5 仅 720P） |\n| `generateAudio` | `audio` | 是否生成对白与音效 |\n| 参考图 | `images[]` | 公网可访问 URL |\n| 参考音频 | `audios[]` | 公网可访问 URL |\n| 参考视频 | `videos[]` | 公网可访问 URL |\n| `mode` | `mode` | reference / first / ends，默认 reference |\n\n## 上游计费\n\n- `wan3-0`：¥2.00/条，与时长分辨率无关。\n- `seedance-2-5`：¥6.00/条（720P）。\n\n## 出片耗时\n\n万相约 1~2 小时，最长 3 小时；插件声明了 `detachedPolling`，提交后释放执行位，由调度回查。\n",
+  "permissions": [
+    "generation.run",
+    "media.read"
+  ],
+  "configuration": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "type": "secret",
+        "label": "API Key",
+        "placeholder": "dc-prod_...",
+        "required": true
+      }
+    ]
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "dacheng-relay",
+        "label": "大橙中转",
+        "capabilities": [
+          "video"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "https://263281.xyz",
+        "detachedPolling": true,
+        "requiresPublicMediaURLs": true,
+        "auth": {
+          "type": "bearer",
+          "field": "apiKey"
+        },
+        "parameters": [
+          {
+            "name": "prompt",
+            "type": "string",
+            "required": false,
+            "mapping": "prompt",
+            "description": "视频描述或编辑要求。"
+          },
+          {
+            "name": "images",
+            "type": "media[]",
+            "required": false,
+            "mapping": "images[]",
+            "description": "参考图，必须是公网可访问的 URL。"
+          },
+          {
+            "name": "videos",
+            "type": "media[]",
+            "required": false,
+            "mapping": "videos[]",
+            "description": "参考视频，必须是公网可访问的 URL。"
+          },
+          {
+            "name": "audios",
+            "type": "media[]",
+            "required": false,
+            "mapping": "audios[]",
+            "description": "参考音频，必须是公网可访问的 URL。"
+          },
+          {
+            "name": "duration",
+            "type": "integer",
+            "required": false,
+            "mapping": "duration",
+            "description": "成片秒数；万相 2-30 秒，Seedance 2.5 为 4-30 秒。"
+          },
+          {
+            "name": "aspectRatio",
+            "type": "string",
+            "required": false,
+            "mapping": "ratio",
+            "values": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "adaptive"
+            ],
+            "description": "画幅。"
+          },
+          {
+            "name": "resolution",
+            "type": "string",
+            "required": false,
+            "mapping": "resolution",
+            "values": [
+              "480P",
+              "720P",
+              "1080P"
+            ],
+            "description": "清晰度；Seedance 2.5 仅支持 720P。"
+          },
+          {
+            "name": "generateAudio",
+            "type": "boolean",
+            "required": false,
+            "mapping": "audio",
+            "description": "是否同时生成对白与音效。"
+          },
+          {
+            "name": "providerOptions",
+            "type": "object",
+            "required": false,
+            "mapping": "mode",
+            "description": "命名空间 dacheng-relay：mode（reference / first / ends）覆盖参考模式。"
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/api/open/v1/videos",
+          "originPath": true,
+          "contentType": "application/json",
+          "body": {
+            "modelKey": {
+              "$ref": "request.model"
+            },
+            "prompt": {
+              "$omitEmpty": {
+                "$ref": "request.prompt"
+              }
+            },
+            "duration": {
+              "$if": {
+                "condition": {
+                  "$gt": [
+                    {
+                      "$ref": "request.duration"
+                    },
+                    0
+                  ]
+                },
+                "then": {
+                  "$ref": "request.duration"
+                },
+                "else": 10
+              }
+            },
+            "ratio": {
+              "$omitEmpty": {
+                "$ref": "request.aspectRatio"
+              }
+            },
+            "resolution": {
+              "$omitEmpty": {
+                "$upper": {
+                  "$ref": "request.resolution"
+                }
+              }
+            },
+            "audio": {
+              "$coalesce": [
+                {
+                  "$ref": "request.generateAudio"
+                },
+                true
+              ]
+            },
+            "mode": {
+              "$coalesce": [
+                {
+                  "$ref": "request.providerOptions.dacheng-relay.mode"
+                },
+                "reference"
+              ]
+            },
+            "images": {
+              "$omitEmpty": {
+                "$map": {
+                  "from": {
+                    "$sortByOrder": {
+                      "$ref": "request.images"
+                    }
+                  },
+                  "as": "media",
+                  "in": {
+                    "$ref": "media.value"
+                  }
+                }
+              }
+            },
+            "videos": {
+              "$omitEmpty": {
+                "$map": {
+                  "from": {
+                    "$sortByOrder": {
+                      "$ref": "request.videos"
+                    }
+                  },
+                  "as": "media",
+                  "in": {
+                    "$ref": "media.value"
+                  }
+                }
+              }
+            },
+            "audios": {
+              "$omitEmpty": {
+                "$map": {
+                  "from": {
+                    "$sortByOrder": {
+                      "$ref": "request.audios"
+                    }
+                  },
+                  "as": "media",
+                  "in": {
+                    "$ref": "media.value"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "poll": {
+          "method": "GET",
+          "path": "/api/open/v1/videos/{{taskId}}",
+          "originPath": true
+        },
+        "response": {
+          "taskId": {
+            "$coalesce": [
+              {
+                "$ref": "response.id"
+              },
+              {
+                "$ref": "response.task_id"
+              },
+              {
+                "$ref": "taskId"
+              }
+            ]
+          },
+          "status": {
+            "$switch": {
+              "cases": [
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$lower": {
+                          "$coalesce": [
+                            {
+                              "$ref": "response.status"
+                            },
+                            ""
+                          ]
+                        }
+                      },
+                      "succeeded"
+                    ]
+                  },
+                  "then": "succeeded"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$lower": {
+                          "$coalesce": [
+                            {
+                              "$ref": "response.status"
+                            },
+                            ""
+                          ]
+                        }
+                      },
+                      "failed"
+                    ]
+                  },
+                  "then": "failed"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$lower": {
+                          "$coalesce": [
+                            {
+                              "$ref": "response.status"
+                            },
+                            ""
+                          ]
+                        }
+                      },
+                      "cancelled"
+                    ]
+                  },
+                  "then": "cancelled"
+                },
+                {
+                  "when": {
+                    "$in": [
+                      {
+                        "$lower": {
+                          "$coalesce": [
+                            {
+                              "$ref": "response.status"
+                            },
+                            ""
+                          ]
+                        }
+                      },
+                      [
+                        "running",
+                        "processing",
+                        "generating",
+                        "in_progress"
+                      ]
+                    ]
+                  },
+                  "then": "processing"
+                },
+                {
+                  "when": {
+                    "$in": [
+                      {
+                        "$lower": {
+                          "$coalesce": [
+                            {
+                              "$ref": "response.status"
+                            },
+                            ""
+                          ]
+                        }
+                      },
+                      [
+                        "pending",
+                        "queued",
+                        "created",
+                        "submitted"
+                      ]
+                    ]
+                  },
+                  "then": "pending"
+                }
+              ],
+              "default": "pending"
+            }
+          },
+          "message": {
+            "$coalesce": [
+              {
+                "$ref": "response.error"
+              },
+              {
+                "$ref": "response.message"
+              }
+            ]
+          },
+          "videos": {
+            "$ref": "response.video_url"
+          },
+          "resultEphemeral": true
+        }
+      }
+    ]
+  }
+}
