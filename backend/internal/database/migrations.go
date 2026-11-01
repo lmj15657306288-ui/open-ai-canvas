@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 	"time"
 
 	"yingce/backend/internal/kernel"
@@ -11,6 +14,19 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// legacyMigrationCompatEnv 用于兼容迁移编号被重排过的历史自建分支。
+// 开启后，已应用记录的名称/校验和不一致只记录告警，不阻断后续新增迁移。
+const legacyMigrationCompatEnv = "CANVAS_MIGRATION_LEGACY_COMPAT"
+
+func legacyMigrationCompatEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(legacyMigrationCompatEnv))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
 
 const CurrentSchemaVersion int64 = 78
 
@@ -858,6 +874,14 @@ func validateMigrationRecords(db *gorm.DB) error {
 }
 
 func validateMigrationRecord(applied schemaMigration, expected migration) error {
+	if applied.Name == expected.name && applied.Checksum == expected.checksum {
+		return nil
+	}
+	if legacyMigrationCompatEnabled() {
+		log.Printf("数据库迁移 %d 记录与程序不一致（记录 %s / %s，期望 %s / %s），兼容模式继续",
+			expected.version, applied.Name, applied.Checksum, expected.name, expected.checksum)
+		return nil
+	}
 	if applied.Name != expected.name {
 		return fmt.Errorf("数据库迁移 %d 名称不一致：记录为 %s，程序期望 %s", expected.version, applied.Name, expected.name)
 	}
