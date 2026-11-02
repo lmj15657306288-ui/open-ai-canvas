@@ -30,7 +30,7 @@ const (
 	s3MultipartThreshold = 32 << 20
 	// 每片 8MiB：远低于 100MiB 上限；片小一点在隧道上更容易并行摊平 RTT。
 	s3MultipartPartSize = 8 << 20
-	// 6 路并发：实测单流只有 ~0.5MB/s，靠多片并行把链路跑满。
+	// 6 路并发：实测单流只有 ~0.5MB/s；6 路最优，12 路反而因链路拥塞回落到 0.6MB/s。
 	s3MultipartConcurrency = 6
 )
 
