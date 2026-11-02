@@ -138,7 +138,7 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 
 // putS3ObjectMultipart 用分片上传写入大对象。
 // 相较单次 PutObject：每个分片是独立 HTTP 请求（16MiB），不会被前置代理的
-// 请求体上限拦截；上传完成后回读对象元信息，校验落盘大小并把真实 ETag 返回给调用方。
+// 请求体上限拦截；ETag 直接取自 CompleteMultipartUpload，大小校验尽力而为。
 func putS3ObjectMultipart(ctx context.Context, client *awss3.S3, setting Settings, key string, mimeType string, size int64, body io.Reader) (string, error) {
 	reader := body
 	if size >= 0 {
@@ -159,17 +159,21 @@ func putS3ObjectMultipart(ctx context.Context, client *awss3.S3, setting Setting
 	if err != nil {
 		return "", fmt.Errorf("S3 分片上传失败：%w", err)
 	}
-	if size < 0 {
-		return strings.Trim(aws.StringValue(output.ETag), `"`), nil
+	// CompleteMultipartUpload 已经把 ETag 带回来了，不必为了取 ETag 再发一次 HEAD。
+	etag := strings.Trim(aws.StringValue(output.ETag), `"`)
+	if size >= 0 {
+		// 尽力校验落盘大小。部分 S3 兼容网关对 HEAD 的鉴权与 GET 不一致，
+		// 这种情况不应该让已经成功的上传变成失败。
+		if head, headErr := client.HeadObjectWithContext(ctx, &awss3.HeadObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key)}); headErr == nil {
+			if got := aws.Int64Value(head.ContentLength); got != size {
+				return "", fmt.Errorf("S3 分片上传后大小不一致：期望 %d，实际 %d", size, got)
+			}
+			if etag == "" {
+				etag = strings.Trim(aws.StringValue(head.ETag), `"`)
+			}
+		}
 	}
-	head, err := client.HeadObjectWithContext(ctx, &awss3.HeadObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key)})
-	if err != nil {
-		return "", fmt.Errorf("S3 分片上传后校验失败：%w", err)
-	}
-	if got := aws.Int64Value(head.ContentLength); got != size {
-		return "", fmt.Errorf("S3 分片上传后大小不一致：期望 %d，实际 %d", size, got)
-	}
-	return strings.Trim(aws.StringValue(head.ETag), `"`), nil
+	return etag, nil
 }
 
 func GetS3ObjectRange(setting Settings, objectKey string, rangeHeader string) (*ObjectStream, error) {
