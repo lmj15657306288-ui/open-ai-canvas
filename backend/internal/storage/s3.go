@@ -20,6 +20,18 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	awsv4 "github.com/aws/aws-sdk-go/aws/signer/v4"
 	awss3 "github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+)
+
+const (
+	// s3MultipartThreshold 以上的对象改走分片上传。
+	// 单次 PutObject 会把整个对象塞进一个 HTTP 请求体，在 Cloudflare 这类前置代理
+	// （默认请求体上限 100MiB）后面会被 413 直接拒绝，大视频因此永远写不进去。
+	s3MultipartThreshold = 32 << 20
+	// 每片 16MiB：远低于 100MiB 上限，同时对 frp 隧道保持温和。
+	s3MultipartPartSize = 16 << 20
+	// 并发不宜过高：NAS 侧走 frp 单连接转发，3 路已能打满带宽。
+	s3MultipartConcurrency = 3
 )
 
 func ValidateStorageEndpoint(raw string) (*url.URL, error) {
@@ -87,6 +99,12 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 	if err != nil {
 		return "", err
 	}
+	key := strings.TrimLeft(objectKey, "/")
+	if size < 0 || size >= s3MultipartThreshold {
+		// 大对象不再整体缓冲，直接按片流式上传：既绕开代理请求体上限，
+		// 也避免把几百 MB 视频读进内存。
+		return putS3ObjectMultipart(ctx, client, setting, key, mimeType, size, body)
+	}
 	var seekable io.ReadSeeker
 	if reader, ok := body.(io.ReadSeeker); ok {
 		seekable = reader
@@ -104,7 +122,7 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 		}
 		seekable = bytes.NewReader(data)
 	}
-	input := &awss3.PutObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(strings.TrimLeft(objectKey, "/")), Body: seekable}
+	input := &awss3.PutObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key), Body: seekable}
 	if mimeType != "" {
 		input.ContentType = aws.String(mimeType)
 	}
@@ -116,6 +134,42 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 		return "", fmt.Errorf("S3 上传失败：%w", err)
 	}
 	return strings.Trim(aws.StringValue(output.ETag), `"`), nil
+}
+
+// putS3ObjectMultipart 用分片上传写入大对象。
+// 相较单次 PutObject：每个分片是独立 HTTP 请求（16MiB），不会被前置代理的
+// 请求体上限拦截；上传完成后回读对象元信息，校验落盘大小并把真实 ETag 返回给调用方。
+func putS3ObjectMultipart(ctx context.Context, client *awss3.S3, setting Settings, key string, mimeType string, size int64, body io.Reader) (string, error) {
+	reader := body
+	if size >= 0 {
+		// 用最多 size 字节喂给分片器：既保证不会读到资源记录之外的内容，
+		// 也让分片器在正确位置收到 EOF。
+		reader = io.LimitReader(body, size)
+	}
+	uploader := s3manager.NewUploaderWithClient(client, func(u *s3manager.Uploader) {
+		u.PartSize = s3MultipartPartSize
+		u.Concurrency = s3MultipartConcurrency
+		u.LeavePartsOnError = false
+	})
+	input := &s3manager.UploadInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key), Body: reader}
+	if mimeType != "" {
+		input.ContentType = aws.String(mimeType)
+	}
+	output, err := uploader.UploadWithContext(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("S3 分片上传失败：%w", err)
+	}
+	if size < 0 {
+		return strings.Trim(aws.StringValue(output.ETag), `"`), nil
+	}
+	head, err := client.HeadObjectWithContext(ctx, &awss3.HeadObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key)})
+	if err != nil {
+		return "", fmt.Errorf("S3 分片上传后校验失败：%w", err)
+	}
+	if got := aws.Int64Value(head.ContentLength); got != size {
+		return "", fmt.Errorf("S3 分片上传后大小不一致：期望 %d，实际 %d", size, got)
+	}
+	return strings.Trim(aws.StringValue(head.ETag), `"`), nil
 }
 
 func GetS3ObjectRange(setting Settings, objectKey string, rangeHeader string) (*ObjectStream, error) {
