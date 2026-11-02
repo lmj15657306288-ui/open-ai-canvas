@@ -28,10 +28,10 @@ const (
 	// 单次 PutObject 会把整个对象塞进一个 HTTP 请求体，在 Cloudflare 这类前置代理
 	// （默认请求体上限 100MiB）后面会被 413 直接拒绝，大视频因此永远写不进去。
 	s3MultipartThreshold = 32 << 20
-	// 每片 16MiB：远低于 100MiB 上限，同时对 frp 隧道保持温和。
-	s3MultipartPartSize = 16 << 20
-	// 并发不宜过高：NAS 侧走 frp 单连接转发，3 路已能打满带宽。
-	s3MultipartConcurrency = 3
+	// 每片 8MiB：远低于 100MiB 上限；片小一点在隧道上更容易并行摊平 RTT。
+	s3MultipartPartSize = 8 << 20
+	// 6 路并发：实测单流只有 ~0.5MB/s，靠多片并行把链路跑满。
+	s3MultipartConcurrency = 6
 )
 
 func ValidateStorageEndpoint(raw string) (*url.URL, error) {
