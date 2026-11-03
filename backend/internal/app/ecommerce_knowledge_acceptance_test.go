@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"yingce/backend/internal/ecommerceagent"
+	"yingce/backend/internal/ecommercecatalog"
 	"yingce/backend/internal/model"
 )
 
@@ -121,12 +122,29 @@ func TestEcommerceKnowledgeDrivesDirectionsForFiveProducts(t *testing.T) {
 		if response.ProductCategory != product.Category || ids[product.KB01] != "KB01" || ids["kb08-taobao-tmall-rules"] != "KB08" {
 			t.Fatalf("%s: category=%s evidence=%v", product.Name, response.ProductCategory, ids)
 		}
+		hierarchy := map[string]bool{}
+		for _, node := range ecommercecatalog.Lineage(ecommercecatalog.ResolveProduct(product.Request.Category, product.Request.ProductName).Node.ID) {
+			hierarchy["industry-taxonomy-"+node.ID] = true
+			hierarchy["kb19-industry-"+node.ID] = true
+		}
 		for _, item := range response.Evidence {
-			for other, labels := range ecommerceCategoryTitleLabels {
-				for _, label := range labels {
-					if other != product.Category && strings.HasPrefix(item.ID, "kb") && strings.Contains(item.Title, label) {
-						t.Fatalf("%s: retrieved knowledge for another category: %s %s", product.Name, item.ID, item.Title)
-					}
+			// A correct appliance path includes its broader home/garden parent.
+			// Check hierarchy identity rather than treating ancestor names as leaks.
+			if item.KnowledgeType == "industry_method" || item.KnowledgeType == "category_taxonomy" {
+				if !hierarchy[item.ID] {
+					t.Fatalf("%s: unrelated industry hierarchy %s", product.Name, item.ID)
+				}
+				continue
+			}
+			// Shared editorial titles can mention both home and appliances. The
+			// stored scope, not words in a display title, defines applicability.
+			if strings.HasPrefix(item.ID, "kb") {
+				stored, err := svc.repo.EcommerceKnowledgeEntryByID(item.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if stored.Category != "general" && stored.Category != product.Category {
+					t.Fatalf("%s: retrieved knowledge from %s: %s", product.Name, stored.Category, item.ID)
 				}
 			}
 		}
@@ -403,6 +421,9 @@ func TestEcommerceSelectedDirectionFlowsToPlanningAndImageTask(t *testing.T) {
 	if stringValue(metadata["ecommerceDirectionLock"]) != locks[chosen.ID] || metadata["ecommerceSkillTrace"] == nil {
 		t.Fatalf("planning task metadata = %+v", metadata)
 	}
+	if metadata["ecommerceManagedSkills"] == nil {
+		t.Fatal("managed skill routing receipt missing from planning task")
+	}
 	// The run's drawn layouts close the planning prompt and travel with the task.
 	if variation, _ := metadata["ecommerceDesignVariation"].(map[string]any); variation == nil || strings.LastIndex(planningPrompt, "【本轮版式方案·"+ecommerceagent.DesignPlaybookVersion+"】") < strings.Index(planningPrompt, "【视觉策略 Skill 输出") {
 		t.Fatalf("planning prompt or task lacks the design variation: %+v", metadata["ecommerceDesignVariation"])
@@ -422,6 +443,9 @@ func TestEcommerceSelectedDirectionFlowsToPlanningAndImageTask(t *testing.T) {
 	var account model.CreditAccount
 	db.First(&account, "user_id = ?", "user")
 	creditsBefore := account.AvailableMicrocredits
+	if !strings.Contains(plan.Images[0].Prompt, "本轮已选Skills图片执行约束") {
+		t.Fatal("managed skill execution rules did not reach image prompt")
+	}
 	imageTask, err := svc.CreateWorkbenchTask("user", WorkbenchTaskInput{Kind: WorkbenchKindImage, Prompt: plan.Images[0].Prompt, Model: "gpt-image-2", ChannelID: "image-channel", Parameters: map[string]any{"size": "1024x1024", "count": 1}}, "", "")
 	if err != nil {
 		t.Fatal(err)

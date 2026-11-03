@@ -20,7 +20,7 @@ export default function EcommerceKnowledgePage() {
     const [stats, setStats] = useState<CommerceKnowledgeStats>();
     const [data, setData] = useState<CommerceKnowledgePage>();
     const [page, setPage] = useState(1);
-    const [status, setStatus] = useState("pending");
+    const [status, setStatus] = useState("approved");
     const [keyword, setKeyword] = useState("");
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
@@ -122,9 +122,9 @@ export default function EcommerceKnowledgePage() {
                             .join(" · ") || "暂无"}
                         。分类数量是知识记录数，不能代表各类目视觉规则已完整覆盖。
                     </Typography.Paragraph>
-                    <section aria-label="十大知识域覆盖" style={{ marginBottom: 24 }}>
+                    <section aria-label="知识域覆盖" style={{ marginBottom: 24 }}>
                         <Typography.Title level={5} style={{ marginTop: 0 }}>
-                            十大知识域
+                            知识域
                         </Typography.Title>
                         <Typography.Paragraph type="secondary">下方数量只统计已审核且未过期的知识条目；数量不代表该知识域已完整覆盖。</Typography.Paragraph>
                         <Space wrap size={[8, 8]}>
@@ -213,6 +213,7 @@ export default function EcommerceKnowledgePage() {
                                         ]}
                                     />
                                 </Space>
+                                {!loading && data?.total === 0 ? <Alert type="info" showIcon message="当前筛选没有匹配条目。可切换为“有效”或“全部”，或清空搜索词查看已有知识。" style={{ marginBottom: 12 }} /> : null}
                                 <Table
                                     rowKey="id"
                                     size="small"

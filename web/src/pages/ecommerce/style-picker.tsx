@@ -22,6 +22,8 @@ const inspirations: EcommerceStyleRewrite[] = [
 function cardStyle(direction: EcommerceCreativeDirection, index: number): CSSProperties {
     const colors = directionSwatches(direction).flatMap((swatch) => (swatch.color ? [swatch.color] : []));
     const style: Record<string, string | number> = { "--i": index };
+    const typography = direction.visual?.typography ?? "";
+    style["--style-font"] = /宋|衬线/.test(typography) ? '"Noto Serif SC", "Songti SC", SimSun, serif' : /圆/.test(typography) ? '"Yuanti SC", "Microsoft YaHei", sans-serif' : '"Noto Sans SC", "Microsoft YaHei", sans-serif';
     if (colors.length) Object.assign(style, { "--c1": colors[0], "--c2": colors[1] ?? colors[0], "--c3": colors[2] ?? colors[1] ?? colors[0] });
     return style as CSSProperties;
 }
@@ -154,7 +156,7 @@ export function CommerceStylePicker({
                             STYLE STUDIO · {total} 种风格
                         </small>
                         <h2>为这件商品选一种视觉风格</h2>
-                        <p>小夜已按商品推荐四套反差风格；也可以按分类挑选，或写下你自己的风格。点卡片右上角的铅笔，可以改写任意风格。</p>
+                        <p>已按这件商品的品类推荐 {total} 套视觉方案，包含专属场景、字体和版式。可以按分类挑选，或点铅笔改写风格。</p>
                     </div>
                 </header>
                 <nav className="commerce-style-picker-tabs" role="tablist" aria-label="风格分类">

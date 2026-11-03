@@ -150,6 +150,7 @@ var platformGuides = map[string]PlatformGuide{
 // platformFamilies maps workbench platform ids (and common Chinese names) to a
 // guide family.
 var platformFamilies = map[string]string{
+	"shein": "indie", "希音": "indie",
 	"xiaohongshu": "xiaohongshu", "小红书": "xiaohongshu", "小红书电商": "xiaohongshu",
 	"douyin": "short-video", "kuaishou": "short-video", "抖音": "short-video", "抖音电商": "short-video", "快手": "short-video", "快手电商": "short-video",
 	"taobao": "shelf", "tmall": "shelf", "jd": "shelf", "淘宝": "shelf", "天猫": "shelf", "京东": "shelf",
@@ -171,6 +172,7 @@ var platformFamilies = map[string]string{
 }
 
 var platformDisplayNames = map[string]string{
+	"shein":  "SHEIN（希音）",
 	"taobao": "淘宝", "tmall": "天猫", "jd": "京东", "pdd": "拼多多", "pinduoduo": "拼多多", "douyin": "抖音电商", "kuaishou": "快手电商", "1688": "1688", "xiaohongshu": "小红书电商",
 	"amazon": "Amazon", "temu": "Temu", "shopee": "Shopee", "lazada": "Lazada", "tiktok": "TikTok Shop", "tiktok-shop": "TikTok Shop", "shopify": "Shopify", "ebay": "eBay", "aliexpress": "AliExpress",
 	"wechat-shop": "微信小店", "video-shop": "视频号小店", "etsy": "Etsy", "walmart": "Walmart", "mercado-libre": "Mercado Libre", "coupang": "Coupang", "rakuten": "Rakuten", "ozon": "Ozon",
@@ -197,6 +199,23 @@ func PlatformGuideFor(platformID string) PlatformGuide {
 	id := platformKey(platformID)
 	guide := platformGuides[platformFamily(id)]
 	guide.Routes = append([]string(nil), guide.Routes...)
+	if p, ok := PlatformKnowledgeFor(platformID); ok {
+		guide.Tone = p.Style
+		guide.Avoid += "；" + p.Risk
+		if !p.WhiteMain && guide.Key == "listing" {
+			guide.Layout = "真实商品多角度摄影，背景按具体类目核实，不套用Amazon的纯白占比；不掩盖缺陷。"
+		}
+		if p.AllListingNoText {
+			guide.Layout = "商品刊登图采用客观真实摄影，不添加标题、营销图形或信息图；独立社媒封面另按用途处理。"
+			guide.UIKit = "商品刊登图不叠加UI、水印或边框。"
+		}
+		if p.ID == "shein" {
+			guide.Key, guide.Label = "indie", "时尚目录"
+			guide.Layout = "服饰用正背面版型、自然上身、面料细节；非服饰用清楚的用途与细节摄影。主图不叠加文案，副图按站点类目核实。"
+			guide.UIKit = "克制留白与统一色彩，不用爆炸贴、平台徽章或价格贴。"
+			guide.Routes = []string{"杂志编辑", "潮流街头", "极简留白", "自然有机"}
+		}
+	}
 	name := platformDisplayNames[id]
 	if name == "" {
 		name = strings.TrimSpace(platformID)
@@ -212,6 +231,9 @@ func PlatformGuideFor(platformID string) PlatformGuide {
 // It mirrors the web's commercePlatformListingMain: a main image, or a single
 // image whose purpose is a main image, on a listing-family platform.
 func ListingMainImage(platformID, imageType, purpose string) bool {
+	if p, ok := PlatformKnowledgeFor(platformID); ok {
+		return p.WhiteMain && (imageType == "main" || (imageType == "single" && strings.Contains(purpose, "主图")))
+	}
 	if platformFamily(platformID) != "listing" {
 		return false
 	}
@@ -1004,7 +1026,7 @@ var designCastingModifiers = []designOption{
 	opt("cast-nordic", "选角：北欧裔面孔，北欧极简穿搭（针织、亚麻与低饱和色）"),
 	opt("cast-black", "选角：非裔面孔，明亮配色的都市休闲穿搭"),
 	opt("cast-latino", "选角：拉丁裔面孔，暖色系度假风穿搭", "id:mercado-libre"),
-	opt("cast-southasian", "选角：南亚裔面孔，现代简约穿搭点缀民族纹样"),
+	opt("cast-southasian", "选角：南亚裔面孔，按商品场景选择现代日常穿搭", "id:india"),
 	opt("cast-eastasian", "选角：东亚裔面孔，美式通勤休闲穿搭"),
 	opt("cast-mideast", "选角：中东裔面孔，得体的长袖穿搭（女性可佩头巾），沉稳大地色", "id:noon"),
 	opt("cast-sea", "选角：东南亚裔面孔，轻薄明快的热带休闲穿搭", "id:shopee", "id:lazada"),
@@ -1046,6 +1068,7 @@ type DesignVariation struct {
 // while the pool still has other fitting entries.
 type VariationInput struct {
 	ImageType, Platform, Category, Distribution, Purpose, Style string
+	Region, Language                                            string
 	Count                                                       int
 	NoText, PeopleAllowed, MultiVariant                         bool
 	Avoid                                                       []string
@@ -1128,11 +1151,19 @@ func drawDesignVariation(r *rand.Rand, in VariationInput, avoid map[string]bool)
 		if p.people && (withPeople || designPersonaTypes[kind]) {
 			if persona, ok := p.pickOne(designPersonas[category]); ok {
 				v.Persona, picks = persona.text, append(picks, persona.id)
-				if crossBorderFamilies[p.family] {
-					if cast, ok := p.pickCasting(); ok {
+				market, overseas, direction := designCastingMarket(in)
+				v.Persona += "；市场人物方向：" + direction
+				if overseas {
+					casting := *p
+					casting.platform = market
+					if cast, ok := casting.pickCasting(); ok {
 						v.Persona, picks = v.Persona+"；"+cast.text, append(picks, cast.id)
 					}
 				}
+				if face, ok := p.pickOne(designFaceDetails); ok {
+					v.Persona, picks = v.Persona+"；"+face.text, append(picks, face.id)
+				}
+				v.Persona += "；按商品明确的适用人群校准年龄与性别，脸部识别点服从人物年龄和已上传参考。逐张 prompt 复述本轮人物面貌与自然肤质，不能只写漂亮模特或只改变衣服。"
 			}
 		}
 		for _, scene := range p.pick(designScenes[category], designSceneCounts[kind]) {
