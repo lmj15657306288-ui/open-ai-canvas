@@ -93,7 +93,9 @@ services:
     image: open-ai-canvas-web:server
     build:
       context: .
-      dockerfile: Dockerfile
+      # 默认在容器内构建前端；CPU 不支持 AVX2 的机器可用 docker/Dockerfile.web-prebuilt
+      # 配合预生成的 web/dist，避免 bun 在构建阶段因指令集不兼容崩溃。
+      dockerfile: ${WEB_DOCKERFILE:-Dockerfile}
     ports:
       - "127.0.0.1:5173:3000"
     depends_on:
