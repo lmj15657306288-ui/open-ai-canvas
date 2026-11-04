@@ -11,7 +11,7 @@
 # 由 compose 的 WEB_DOCKERFILE 变量选择使用哪个 Dockerfile。
 FROM nginx:1.27-alpine
 
-COPY web/dist /opt/canvas-release
+COPY docker/web-dist /opt/canvas-release
 COPY docker/canvas-web-entrypoint.sh /usr/local/bin/canvas-web-entrypoint
 RUN chmod +x /usr/local/bin/canvas-web-entrypoint
 COPY nginx.conf /etc/nginx/conf.d/default.conf
