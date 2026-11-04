@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"os"
-	"strings"
 	"time"
 
 	"yingce/backend/internal/kernel"
@@ -14,19 +11,6 @@ import (
 
 	"gorm.io/gorm"
 )
-
-// legacyMigrationCompatEnv 用于兼容迁移编号被重排过的历史自建分支。
-// 开启后，已应用记录的名称/校验和不一致只记录告警，不阻断后续新增迁移。
-const legacyMigrationCompatEnv = "CANVAS_MIGRATION_LEGACY_COMPAT"
-
-func legacyMigrationCompatEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(legacyMigrationCompatEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
 
 const CurrentSchemaVersion int64 = 81
 
@@ -290,11 +274,29 @@ var schemaMigrations = []migration{
 	{version: 75, name: "user_groups_pricing_currency", checksum: "sha256:user-groups-pricing-currency-v75-20261028", apply: migrateUserGroupsPricingCurrency},
 	{version: 76, name: "agent_memory_document_skill_discovery", checksum: "sha256:agent-memory-document-skill-discovery-v76-20261028", apply: migrateAgentMemoryDocumentSkillDiscovery},
 	{version: 77, name: "agent_memory_document_columns", checksum: "sha256:agent-memory-document-columns-v77-20261028", apply: migrateAgentMemoryDocumentColumns},
-	{version: 78, name: "ecommerce_agent_and_knowledge", checksum: "sha256:ecommerce-agent-and-knowledge-v78-20261101", apply: migrateEcommerceFeature},
-	// 上游 v1.7.3.4 的 drama_cast_voice_looks 原本占用 78，与已上线的 ecommerce 迁移撞号，顺延为 79。
-	{version: 79, name: "drama_cast_voice_looks", checksum: "sha256:drama-cast-voice-looks-v79-20261101", apply: migrateDramaCastVoiceLooks},
+	{version: 78, name: "drama_cast_voice_looks", checksum: "sha256:drama-cast-voice-looks-v78-20261101", apply: migrateDramaCastVoiceLooks},
+	{version: 79, name: "ecommerce_agent_and_knowledge", checksum: "sha256:ecommerce-agent-and-knowledge-v79-20261101", apply: migrateEcommerceFeature},
 	{version: 80, name: "hypit_replica_tasks", checksum: "sha256:hypit-replica-tasks-v80-20261104", apply: migrateHypitReplicaTasks},
 	{version: 81, name: "hypit_replica_materials", checksum: "sha256:hypit-replica-materials-v81-20261104", apply: migrateHypitReplicaMaterials},
+}
+
+// 复刻视频（Hypit 工作台）的迁移。
+//
+// 注意：本分支的 78/79 与上游的 78/79 名称互换过（ecommerce 与 drama_cast_voice_looks），
+// 生产库按本分支顺序已执行到 81；迁移器按版本号判定已应用，兼容模式下不会重跑。
+
+// migrateHypitReplicaTasks 建立视频复刻任务表与执行节点心跳表。
+// 任务只保存排队与展示所需字段；渲染上下文全部留在 Worker 侧。
+func migrateHypitReplicaTasks(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&model.HypitTask{}, &model.HypitWorker{}); err != nil {
+		return err
+	}
+	if tx.Migrator().HasTable(&model.HypitTask{}) && !tx.Migrator().HasIndex(&model.HypitTask{}, "idx_hypit_tasks_status_created") {
+		if err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_hypit_tasks_status_created ON hypit_tasks (status, created_at)").Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateHypitReplicaMaterials 为复刻任务补素材槽、声音模式与画质字段。
@@ -311,19 +313,6 @@ func migrateHypitReplicaMaterials(tx *gorm.DB) error {
 	return nil
 }
 
-// migrateHypitReplicaTasks 建立视频复刻任务表与执行节点心跳表。
-// 任务只保存排队与展示所需字段；渲染上下文全部留在 Worker 侧。
-func migrateHypitReplicaTasks(tx *gorm.DB) error {
-	if err := tx.AutoMigrate(&model.HypitTask{}, &model.HypitWorker{}); err != nil {
-		return err
-	}
-	if tx.Migrator().HasTable(&model.HypitTask{}) && !tx.Migrator().HasIndex(&model.HypitTask{}, "idx_hypit_tasks_status_created") {
-		if err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_hypit_tasks_status_created ON hypit_tasks (status, created_at)").Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
 // migrateDramaCastVoiceLooks 为短剧设定补角色声音（声音库条目与样本音频）和造型（所属角色、造型名、默认适用章节）。
 // 旧设定都是没有指定声音的角色本体，新增列写成零值。
 func migrateDramaCastVoiceLooks(tx *gorm.DB) error {
@@ -353,7 +342,6 @@ func migrateDramaCastVoiceLooks(tx *gorm.DB) error {
 	}
 	return tx.Migrator().CreateIndex(&model.DramaCast{}, "ParentID")
 }
-
 
 // migrateAgentMemoryDocumentColumns 补齐记忆文件的条目序号与修订的工具调用 ID。
 // 早期构建执行 v76 时这两列还不存在，v76 已记为完成不会重跑；新库由 v76 建全，这里是空操作。
@@ -936,14 +924,6 @@ func validateMigrationRecords(db *gorm.DB) error {
 }
 
 func validateMigrationRecord(applied schemaMigration, expected migration) error {
-	if applied.Name == expected.name && applied.Checksum == expected.checksum {
-		return nil
-	}
-	if legacyMigrationCompatEnabled() {
-		log.Printf("数据库迁移 %d 记录与程序不一致（记录 %s / %s，期望 %s / %s），兼容模式继续",
-			expected.version, applied.Name, applied.Checksum, expected.name, expected.checksum)
-		return nil
-	}
 	if applied.Name != expected.name {
 		return fmt.Errorf("数据库迁移 %d 名称不一致：记录为 %s，程序期望 %s", expected.version, applied.Name, expected.name)
 	}

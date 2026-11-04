@@ -1,6 +1,6 @@
 import { Popover } from "antd";
 import { ShoppingBag } from "lucide-react";
-import { ChevronDown, ChevronRight, CircleUserRound, Film, History as HistoryIcon, Image as ImageIcon, Infinity as InfinityIcon, PanelLeftClose, PanelLeftOpen, Plus, Video } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleUserRound, History as HistoryIcon, Image as ImageIcon, Infinity as InfinityIcon, PanelLeftClose, PanelLeftOpen, Plus, Video } from "lucide-react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -45,16 +45,19 @@ function toolItem(slug: NavigationToolSlug, to: string): WorkspaceNavItem {
 function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[]; footer: WorkspaceNavItem[] } {
     const groups: WorkspaceNavGroup[] = [
         {
-            items: [{ ...toolItem("create", "/"), id: "home", title: "创作" }, ...(features.shortDramaEnabled ? [{ ...toolItem("projects", "/projects"), title: "短剧制作" }] : []), { ...toolItem("canvas", "/canvas"), title: "自由画布" }],
+            items: [
+                { ...toolItem("create", "/"), id: "home", title: "创作" },
+                ...(features.shortDramaEnabled ? [{ ...toolItem("projects", "/projects"), title: "短剧制作" }] : []),
+                ...(features.ecommerceEnabled ? [{ id: "ecommerce", title: "电商 Agent", icon: ShoppingBag, to: "/ecommerce" }] : []),
+                { ...toolItem("canvas", "/canvas"), title: "自由画布" },
+            ],
         },
         {
             heading: "资源与工具",
             items: [
                 ...(features.imageWorkbenchEnabled ? [{ id: "toolbox-image", title: "图片生成", icon: ImageIcon, to: "/toolbox/image" }] : []),
                 ...(features.videoWorkbenchEnabled ? [{ id: "toolbox-video", title: "视频生成", icon: Video, to: "/toolbox/video" }] : []),
-                ...(features.hypitWorkbenchEnabled ? [{ id: "toolbox-hypit", title: "视频复刻", icon: Film, to: "/toolbox/hypit" }] : []),
                 { ...toolItem("skills", "/skills"), title: "技能" },
-                { id: "ecommerce", title: "电商 Agent", icon: ShoppingBag, to: "/ecommerce" },
                 ...(features.pluginCenterEnabled ? [{ ...toolItem("plugins", "/plugins"), title: "插件" }] : []),
             ],
         },

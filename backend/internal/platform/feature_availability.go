@@ -26,6 +26,9 @@ const (
 	FeatureTimelineTranscription = "timelineTranscription"
 	FeatureImageWorkbench        = "imageWorkbench"
 	FeatureVideoWorkbench        = "videoWorkbench"
+	FeatureEcommerce             = "ecommerce"
+	FeatureEcommerceVideo        = "ecommerceVideo"
+	FeatureSiteAssistant         = "siteAssistant"
 	FeatureHypitWorkbench        = "hypitWorkbench"
 )
 
@@ -42,6 +45,9 @@ type FeatureAvailability struct {
 	TimelineTranscriptionEnabled bool `json:"timelineTranscriptionEnabled"`
 	ImageWorkbenchEnabled        bool `json:"imageWorkbenchEnabled"`
 	VideoWorkbenchEnabled        bool `json:"videoWorkbenchEnabled"`
+	EcommerceEnabled             bool `json:"ecommerceEnabled"`
+	EcommerceVideoEnabled        bool `json:"ecommerceVideoEnabled"`
+	SiteAssistantEnabled         bool `json:"siteAssistantEnabled"`
 	HypitWorkbenchEnabled        bool `json:"hypitWorkbenchEnabled"`
 }
 
@@ -67,6 +73,9 @@ func DefaultFeatureAvailability() FeatureAvailability {
 		TimelineTranscriptionEnabled: true,
 		ImageWorkbenchEnabled:        false,
 		VideoWorkbenchEnabled:        false,
+		EcommerceEnabled:             false,
+		EcommerceVideoEnabled:        false,
+		SiteAssistantEnabled:         false,
 		HypitWorkbenchEnabled:        false,
 	}
 }
@@ -139,6 +148,12 @@ func (s *Service) FeatureEnabled(feature string) (bool, error) {
 		return value.ImageWorkbenchEnabled, nil
 	case FeatureVideoWorkbench:
 		return value.VideoWorkbenchEnabled, nil
+	case FeatureEcommerce:
+		return value.EcommerceEnabled, nil
+	case FeatureEcommerceVideo:
+		return value.EcommerceVideoEnabled, nil
+	case FeatureSiteAssistant:
+		return value.SiteAssistantEnabled, nil
 	case FeatureHypitWorkbench:
 		return value.HypitWorkbenchEnabled, nil
 	default:
@@ -177,8 +192,14 @@ func (s *Service) RequireFeature(feature string) error {
 		return kernel.Forbidden("生图暂未开放")
 	case FeatureVideoWorkbench:
 		return kernel.Forbidden("视频暂未开放")
+	case FeatureEcommerce:
+		return kernel.Forbidden("电商创作暂未开放")
+	case FeatureEcommerceVideo:
+		return kernel.Forbidden("电商视频暂未开放")
+	case FeatureSiteAssistant:
+		return kernel.Forbidden("站内助手暂未开放")
 	case FeatureHypitWorkbench:
-		return kernel.Forbidden("视频复刻暂未开放")
+		return kernel.Forbidden("复刻视频暂未开放")
 	default:
 		return kernel.Forbidden("该功能暂未开放")
 	}
