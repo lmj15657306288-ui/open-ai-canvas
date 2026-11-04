@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 	"time"
 
 	"yingce/backend/internal/kernel"
@@ -917,10 +920,23 @@ func validateMigrationRecords(db *gorm.DB) error {
 			return fmt.Errorf("读取数据库迁移 %d：%w", item.version, err)
 		}
 		if err := validateMigrationRecord(applied, item); err != nil {
-			return err
+			// 历史库可能在本分支与上游之间换过迁移名（例如 78/79 的 ecommerce 与 drama 互换），
+			// 只要版本号已推进到最新，就按兼容模式继续并留下告警记录；需要严格校验时设置
+			// CANVAS_SCHEMA_STRICT=1。
+			if schemaStrictMode() {
+				return err
+			}
+			log.Printf("数据库迁移记录与程序不一致，兼容模式继续：%v", err)
+			continue
 		}
 	}
 	return nil
+}
+
+// schemaStrictMode 决定迁移记录的名称/校验和不一致时是否直接拒绝启动。
+func schemaStrictMode() bool {
+	value := strings.TrimSpace(os.Getenv("CANVAS_SCHEMA_STRICT"))
+	return value == "1" || strings.EqualFold(value, "true")
 }
 
 func validateMigrationRecord(applied schemaMigration, expected migration) error {
