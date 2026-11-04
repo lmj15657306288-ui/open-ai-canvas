@@ -8,8 +8,36 @@ import { http } from "@/services/api/request";
  */
 export type HypitTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
-/** 复刻类型：与 hypit 的 workflow 改写方式一一对应。 */
-export type HypitReplicaMode = "full-clone" | "swap-host" | "swap-script" | "swap-broll" | "localize" | "combo";
+/**
+ * 替换类型。
+ *
+ * 前 8 个是工作台当前展示的槽位类型（模特 / 服饰 / 人脸 / 背景 / 商品 / 精准商品 / 精准人物 / 组合），
+ * 后 6 个是早期版本的类型，保留只是为了历史任务能正常回显标题。
+ */
+export type HypitReplicaMode =
+    | "model-swap"
+    | "outfit-swap"
+    | "face-swap"
+    | "background-swap"
+    | "product-swap"
+    | "product-precise"
+    | "person-precise"
+    | "combo-swap"
+    | "full-clone"
+    | "swap-host"
+    | "swap-script"
+    | "swap-broll"
+    | "localize"
+    | "combo";
+
+/** 声音处理方式：替换音频 / 保留原声 / 静音。 */
+export type HypitVoiceMode = "original" | "replace" | "mute";
+
+/** 一个素材槽位提交的资源列表，slot 为业务槽位名（person / outfit / product …）。 */
+export type HypitMaterialSlot = {
+    slot: string;
+    resourceIds: string[];
+};
 
 export type HypitTask = {
     id: string;
@@ -21,8 +49,15 @@ export type HypitTask = {
     instructions: string;
     model?: string;
     aspectRatio?: string;
+    resolution?: string;
     durationSec?: number;
     language?: string;
+    /** 素材槽位快照（JSON 字符串，形如 [{"slot":"person","resourceIds":["..."]}]）。 */
+    materialsJson?: string;
+    voiceMode?: HypitVoiceMode;
+    keepMusic?: boolean;
+    talkingHead?: boolean;
+    subject?: string;
     status: HypitTaskStatus;
     progress: number;
     stage?: string;
@@ -42,8 +77,14 @@ export type HypitTaskCreateInput = {
     instructions?: string;
     model?: string;
     aspectRatio?: string;
+    resolution?: string;
     durationSec?: number;
     language?: string;
+    materials?: HypitMaterialSlot[];
+    voiceMode?: HypitVoiceMode;
+    keepMusic?: boolean;
+    talkingHead?: boolean;
+    subject?: string;
 };
 
 export type HypitTaskPage = {
@@ -55,35 +96,28 @@ export type HypitTaskPage = {
     workerOnline?: boolean;
 };
 
-export const HYPIT_REPLICA_MODES: Array<{ value: HypitReplicaMode; label: string; caption: string; hint: string }> = [
-    { value: "full-clone", label: "整片复刻", caption: "保留结构与节奏", hint: "把参考片的镜头、字幕、B-roll 与节奏整体复刻，只替换内容素材" },
-    { value: "swap-host", label: "换主角", caption: "人物 / 商品替换", hint: "保留分镜与字幕节奏，替换出镜人物或主推商品" },
-    { value: "swap-script", label: "换文案", caption: "口播与字幕改写", hint: "保留画面结构，改写口播与字幕文案，时长自动重排" },
-    { value: "swap-broll", label: "换 B-roll", caption: "空镜与素材替换", hint: "保留 A-roll 与节奏，替换中间的 B-roll 空镜素材" },
-    { value: "localize", label: "换语言", caption: "多语言本地化", hint: "同一支片输出多语言版本，字幕与配音跟随改写" },
-    { value: "combo", label: "组合替换", caption: "多项一起换", hint: "人物、文案、B-roll 同时替换，适合做同结构不同内容的变体" },
-];
+export const HYPIT_MODE_LABELS: Record<string, string> = {
+    "model-swap": "模特替换",
+    "outfit-swap": "服饰替换",
+    "face-swap": "人脸替换",
+    "background-swap": "换背景",
+    "product-swap": "商品替换",
+    "product-precise": "精准商品",
+    "person-precise": "精准人物",
+    "combo-swap": "组合替换",
+    "full-clone": "整片复刻",
+    "swap-host": "换主角",
+    "swap-script": "换文案",
+    "swap-broll": "换 B-roll",
+    localize: "换语言",
+    combo: "组合替换",
+};
 
-export const HYPIT_ASPECT_RATIOS = [
-    { value: "9:16", label: "竖屏 9:16" },
-    { value: "16:9", label: "横屏 16:9" },
-    { value: "1:1", label: "方形 1:1" },
-    { value: "3:4", label: "竖版 3:4" },
-];
-
-export const HYPIT_DURATIONS = [
-    { value: "0", label: "跟随原片" },
-    { value: "15", label: "15 秒" },
-    { value: "30", label: "30 秒" },
-    { value: "60", label: "60 秒" },
-];
-
-export const HYPIT_LANGUAGES = [
-    { value: "source", label: "跟随原片" },
-    { value: "zh", label: "中文" },
-    { value: "en", label: "英文" },
-    { value: "ja", label: "日文" },
-];
+export const HYPIT_VOICE_LABELS: Record<HypitVoiceMode, string> = {
+    replace: "替换音频",
+    original: "保留原声",
+    mute: "静音",
+};
 
 export const HYPIT_STATUS_LABELS: Record<HypitTaskStatus, string> = {
     queued: "排队中",

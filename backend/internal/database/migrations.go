@@ -28,7 +28,7 @@ func legacyMigrationCompatEnabled() bool {
 	}
 }
 
-const CurrentSchemaVersion int64 = 80
+const CurrentSchemaVersion int64 = 81
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -294,6 +294,21 @@ var schemaMigrations = []migration{
 	// 上游 v1.7.3.4 的 drama_cast_voice_looks 原本占用 78，与已上线的 ecommerce 迁移撞号，顺延为 79。
 	{version: 79, name: "drama_cast_voice_looks", checksum: "sha256:drama-cast-voice-looks-v79-20261101", apply: migrateDramaCastVoiceLooks},
 	{version: 80, name: "hypit_replica_tasks", checksum: "sha256:hypit-replica-tasks-v80-20261104", apply: migrateHypitReplicaTasks},
+	{version: 81, name: "hypit_replica_materials", checksum: "sha256:hypit-replica-materials-v81-20261104", apply: migrateHypitReplicaMaterials},
+}
+
+// migrateHypitReplicaMaterials 为复刻任务补素材槽、声音模式与画质字段。
+// 与参考站对齐后单条任务需要携带多槽位素材（人物/商品/背景），因此单独存 JSON。
+func migrateHypitReplicaMaterials(tx *gorm.DB) error {
+	for _, field := range []string{"Resolution", "MaterialsJSON", "VoiceMode", "KeepMusic", "TalkingHead", "Subject"} {
+		if tx.Migrator().HasColumn(&model.HypitTask{}, field) {
+			continue
+		}
+		if err := tx.Migrator().AddColumn(&model.HypitTask{}, field); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateHypitReplicaTasks 建立视频复刻任务表与执行节点心跳表。

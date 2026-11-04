@@ -29,8 +29,16 @@ type HypitTask struct {
 	Instructions        string          `json:"instructions" gorm:"type:text"`
 	Model               string          `json:"model,omitempty" gorm:"size:120"`
 	AspectRatio         string          `json:"aspectRatio,omitempty" gorm:"size:16"`
+	Resolution          string          `json:"resolution,omitempty" gorm:"size:16"`
 	DurationSec         int             `json:"durationSec,omitempty"`
 	Language            string          `json:"language,omitempty" gorm:"size:16"`
+	// MaterialsJSON 保存各素材槽位的资源 ID（如 {"model":["res_1"],"product":["res_2","res_3"]}）。
+	MaterialsJSON string `json:"materialsJson,omitempty" gorm:"type:text"`
+	// VoiceMode: original 保留原声 / replace 按台词重新配音 / mute 静音。
+	VoiceMode   string `json:"voiceMode,omitempty" gorm:"size:16"`
+	KeepMusic   bool   `json:"keepMusic"`
+	TalkingHead bool   `json:"talkingHead"`
+	Subject     string `json:"subject,omitempty" gorm:"size:64"`
 	Status              HypitTaskStatus `json:"status" gorm:"index;size:24"`
 	Progress            int             `json:"progress"`
 	Stage               string          `json:"stage,omitempty" gorm:"size:120"`

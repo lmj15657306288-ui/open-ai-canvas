@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -18,29 +19,54 @@ const (
 )
 
 // hypitReplicaModes 是允许的复刻类型，与前端 chips 一一对应。
+//
+// 前 8 个是工作台展示的槽位类型；后 6 个是早期版本的类型，只为历史任务回显标题保留。
 var hypitReplicaModes = map[string]string{
-	"full-clone":  "整片复刻",
-	"swap-host":   "换主角",
-	"swap-script": "换文案",
-	"swap-broll":  "换 B-roll",
-	"localize":    "换语言",
-	"combo":       "组合替换",
+	"model-swap":      "模特替换",
+	"outfit-swap":     "服饰替换",
+	"face-swap":       "人脸替换",
+	"background-swap": "换背景",
+	"product-swap":    "商品替换",
+	"product-precise": "精准商品",
+	"person-precise":  "精准人物",
+	"combo-swap":      "组合替换",
+	"full-clone":      "整片复刻",
+	"swap-host":       "换主角",
+	"swap-script":     "换文案",
+	"swap-broll":      "换 B-roll",
+	"localize":        "换语言",
+	"combo":           "组合替换",
 }
 
 var hypitAspectRatios = map[string]bool{"9:16": true, "16:9": true, "1:1": true, "3:4": true}
 var hypitLanguages = map[string]bool{"source": true, "zh": true, "en": true, "ja": true}
 
 type HypitTaskCreateRequest struct {
-	Mode                string `json:"mode"`
-	ReferenceResourceID string `json:"referenceResourceId"`
-	ReferenceURL        string `json:"referenceUrl"`
-	ReferenceName       string `json:"referenceName"`
-	Instructions        string `json:"instructions"`
-	Model               string `json:"model"`
-	AspectRatio         string `json:"aspectRatio"`
-	DurationSec         int    `json:"durationSec"`
-	Language            string `json:"language"`
+	Mode                string              `json:"mode"`
+	ReferenceResourceID string              `json:"referenceResourceId"`
+	ReferenceURL        string              `json:"referenceUrl"`
+	ReferenceName       string              `json:"referenceName"`
+	Instructions        string              `json:"instructions"`
+	Model               string              `json:"model"`
+	AspectRatio         string              `json:"aspectRatio"`
+	Resolution          string              `json:"resolution"`
+	DurationSec         int                 `json:"durationSec"`
+	Language            string              `json:"language"`
+	Materials           []HypitMaterialSlot `json:"materials"`
+	VoiceMode           string              `json:"voiceMode"`
+	KeepMusic           bool                `json:"keepMusic"`
+	TalkingHead         bool                `json:"talkingHead"`
+	Subject             string              `json:"subject"`
 }
+
+// HypitMaterialSlot 是一个素材槽位提交的资源列表（人物图、商品图、背景图、参考音色等）。
+type HypitMaterialSlot struct {
+	Slot        string   `json:"slot"`
+	ResourceIDs []string `json:"resourceIds"`
+}
+
+var hypitVoiceModes = map[string]bool{"original": true, "replace": true, "mute": true}
+var hypitResolutions = map[string]bool{"480p": true, "720p": true, "1080p": true}
 
 type HypitTaskPage struct {
 	Items        []model.HypitTask `json:"items"`
@@ -86,6 +112,24 @@ func (s *Service) CreateHypitTask(actor *model.User, req HypitTaskCreateRequest)
 	if len([]rune(instructions)) > hypitMaxInstructions {
 		return nil, BadAuthRequest("补充说明最多 600 字")
 	}
+	materialsJSON, err := s.validateHypitMaterials(actor.ID, req.Materials)
+	if err != nil {
+		return nil, err
+	}
+	voiceMode := strings.TrimSpace(req.VoiceMode)
+	if voiceMode == "" {
+		voiceMode = "original"
+	}
+	if !hypitVoiceModes[voiceMode] {
+		return nil, BadAuthRequest("不支持的声音模式")
+	}
+	resolution := strings.TrimSpace(req.Resolution)
+	if resolution == "" {
+		resolution = "480p"
+	}
+	if !hypitResolutions[resolution] {
+		return nil, BadAuthRequest("不支持的清晰度")
+	}
 	aspectRatio := strings.TrimSpace(req.AspectRatio)
 	if aspectRatio == "" {
 		aspectRatio = "9:16"
@@ -124,8 +168,14 @@ func (s *Service) CreateHypitTask(actor *model.User, req HypitTaskCreateRequest)
 		Instructions:        instructions,
 		Model:               strings.TrimSpace(req.Model),
 		AspectRatio:         aspectRatio,
+		Resolution:          resolution,
 		DurationSec:         req.DurationSec,
 		Language:            language,
+		MaterialsJSON:       materialsJSON,
+		VoiceMode:           voiceMode,
+		KeepMusic:           req.KeepMusic,
+		TalkingHead:         req.TalkingHead,
+		Subject:             truncateRunes(strings.TrimSpace(req.Subject), 64),
 		Status:              model.HypitTaskQueued,
 		Progress:            0,
 		Stage:               "排队中",
@@ -266,6 +316,51 @@ func (s *Service) ReportHypitTask(workerID string, id string, req HypitWorkerRep
 		return nil, err
 	}
 	return task, nil
+}
+
+// validateHypitMaterials 校验每个槽位的资源归属与数量，返回入库用的 JSON。
+// 槽位名称由前端定义（model/product/background/voice...），后端只做安全与数量约束。
+func (s *Service) validateHypitMaterials(userID string, slots []HypitMaterialSlot) (string, error) {
+	if len(slots) == 0 {
+		return "", nil
+	}
+	result := make(map[string][]string, len(slots))
+	total := 0
+	for _, slot := range slots {
+		key := strings.TrimSpace(slot.Slot)
+		if key == "" || len(key) > 32 {
+			return "", BadAuthRequest("素材槽位无效")
+		}
+		ids := make([]string, 0, len(slot.ResourceIDs))
+		for _, raw := range slot.ResourceIDs {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			if _, err := s.repo.ResourceForUser(userID, id); err != nil {
+				return "", BadAuthRequest("素材资源不存在或无权访问")
+			}
+			ids = append(ids, id)
+			total++
+		}
+		if len(ids) > 4 {
+			return "", BadAuthRequest("单个素材槽位最多 4 张")
+		}
+		if len(ids) > 0 {
+			result[key] = ids
+		}
+	}
+	if total > 12 {
+		return "", BadAuthRequest("素材总数过多")
+	}
+	if len(result) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func isHTTPURL(value string) bool {
