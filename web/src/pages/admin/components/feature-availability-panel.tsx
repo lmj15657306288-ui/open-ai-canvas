@@ -12,7 +12,7 @@ import { AdminStatusBadge } from "./admin-ui";
 import "./feature-availability-panel.css";
 
 type FeatureKey =
-    "shortDramaEnabled" | "taskCenterEnabled" | "creditsEnabled" | "customChannelsEnabled" | "inspirationSourcesVisible" | "frontendModelsEnabled" | "pluginCenterEnabled" | "systemPluginsVisibleToUsers" | "imageWorkbenchEnabled" | "videoWorkbenchEnabled";
+    "shortDramaEnabled" | "taskCenterEnabled" | "creditsEnabled" | "customChannelsEnabled" | "inspirationSourcesVisible" | "frontendModelsEnabled" | "pluginCenterEnabled" | "systemPluginsVisibleToUsers" | "imageWorkbenchEnabled" | "videoWorkbenchEnabled" | "hypitWorkbenchEnabled";
 type FeatureRow = {
     key: FeatureKey;
     title: string;
@@ -29,6 +29,7 @@ const editableFeatureKeys: FeatureKey[] = [
     "inspirationSourcesVisible",
     "imageWorkbenchEnabled",
     "videoWorkbenchEnabled",
+    "hypitWorkbenchEnabled",
     "frontendModelsEnabled",
     "pluginCenterEnabled",
     "systemPluginsVisibleToUsers",
@@ -75,6 +76,12 @@ const workspaceFeatureRows: FeatureRow[] = [
         key: "videoWorkbenchEnabled",
         title: "视频生成",
         description: "开放视频入口并允许创建新的工作台视频任务；关闭不删除结果和历史。",
+        icon: <Clapperboard className="size-4" aria-hidden="true" />,
+    },
+    {
+        key: "hypitWorkbenchEnabled",
+        title: "视频复刻",
+        description: "开放 Hypit 视频复刻入口；关闭后任务历史保留，但不再接受新任务。",
         icon: <Clapperboard className="size-4" aria-hidden="true" />,
     },
 ];
@@ -391,6 +398,7 @@ function toEditablePayload(features: FeatureAvailability) {
         inspirationSourcesVisible: features.inspirationSourcesVisible,
         imageWorkbenchEnabled: features.imageWorkbenchEnabled,
         videoWorkbenchEnabled: features.videoWorkbenchEnabled,
+        hypitWorkbenchEnabled: features.hypitWorkbenchEnabled,
         frontendModelsEnabled: features.frontendModelsEnabled,
         pluginCenterEnabled: features.pluginCenterEnabled,
         systemPluginsVisibleToUsers: features.systemPluginsVisibleToUsers,
@@ -416,6 +424,7 @@ function parseFeatureAvailability(value: unknown): FeatureAvailability {
         inspirationSourcesVisible: record.inspirationSourcesVisible as boolean,
         imageWorkbenchEnabled: record.imageWorkbenchEnabled as boolean,
         videoWorkbenchEnabled: record.videoWorkbenchEnabled as boolean,
+        hypitWorkbenchEnabled: record.hypitWorkbenchEnabled as boolean,
         frontendModelsEnabled: record.frontendModelsEnabled as boolean,
         pluginCenterEnabled: record.pluginCenterEnabled as boolean,
         systemPluginsVisibleToUsers: record.systemPluginsVisibleToUsers as boolean,

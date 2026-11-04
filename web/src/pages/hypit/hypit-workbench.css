@@ -1,0 +1,385 @@
+/* Hypit 视频复刻工作台（/toolbox/hypit）。
+   骨架复用 workbench 的 .wb-shell / .wb-composer / .wb-section，这里只补结果区与上传区。
+   变量全部来自 .wb-shell 继承下来的 --wb-* token，不新增颜色。 */
+
+/* ---------- 结果舞台 ---------- */
+.hypit-stage {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    border-radius: var(--r-2xl);
+    background: var(--wb-panel);
+}
+
+.hypit-stage-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid color-mix(in srgb, var(--wb-line) 70%, transparent);
+}
+
+.hypit-stage-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-size: var(--fs-heading);
+    font-weight: 600;
+    color: var(--wb-ink);
+}
+
+.hypit-stage-title small {
+    font-size: var(--fs-ui);
+    font-weight: 400;
+    color: var(--wb-ink-3);
+}
+
+.hypit-stage-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-4);
+    scrollbar-width: thin;
+}
+
+/* ---------- 空状态 ---------- */
+.hypit-empty {
+    display: grid;
+    place-items: center;
+    gap: var(--space-4);
+    height: 100%;
+    min-height: 280px;
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+}
+
+.hypit-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border-radius: var(--r-2xl);
+    background: var(--wb-muted);
+    color: var(--wb-ink-3);
+}
+
+.hypit-empty-icon svg {
+    width: 26px;
+    height: 26px;
+    stroke-width: 1.6;
+}
+
+.hypit-empty h3 {
+    margin: 0;
+    font-size: var(--fs-heading);
+    font-weight: 600;
+    color: var(--wb-ink);
+}
+
+.hypit-empty p {
+    max-width: 34em;
+    margin: 0;
+    font-size: var(--fs-ui);
+    line-height: 1.7;
+    color: var(--wb-ink-3);
+}
+
+.hypit-steps {
+    display: grid;
+    gap: var(--space-2);
+    width: 100%;
+    max-width: 420px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    text-align: left;
+}
+
+.hypit-steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-radius: var(--r-lg);
+    background: var(--wb-muted);
+    font-size: var(--fs-ui);
+    line-height: 1.6;
+    color: var(--wb-ink-2);
+}
+
+.hypit-steps b {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--wb-selected-bg);
+    color: var(--wb-selected-fg);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* ---------- 参考视频上传区 ---------- */
+.hypit-drop {
+    display: grid;
+    place-items: center;
+    gap: var(--space-2);
+    padding: var(--space-5) var(--space-4);
+    border: 1px dashed color-mix(in srgb, var(--wb-line-strong) 80%, transparent);
+    border-radius: var(--r-xl);
+    background: var(--wb-muted);
+    color: var(--wb-ink-3);
+    font-size: var(--fs-ui);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color var(--wb-motion), background-color var(--wb-motion), color var(--wb-motion);
+}
+
+.hypit-drop:hover,
+.hypit-drop.is-dragging {
+    border-color: var(--wb-selected-line);
+    background: var(--wb-hover);
+    color: var(--wb-ink-2);
+}
+
+.hypit-drop svg {
+    width: 22px;
+    height: 22px;
+    stroke-width: 1.7;
+}
+
+.hypit-drop small {
+    color: var(--wb-ink-3);
+    font-size: var(--fs-caption);
+}
+
+.hypit-ref {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-radius: var(--r-lg);
+    background: var(--wb-muted);
+}
+
+.hypit-ref-thumb {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-md);
+    background: var(--wb-panel);
+    color: var(--wb-ink-3);
+    overflow: hidden;
+}
+
+.hypit-ref-thumb svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 1.7;
+}
+
+.hypit-ref-meta {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.hypit-ref-meta strong {
+    overflow: hidden;
+    font-size: var(--fs-ui);
+    font-weight: 500;
+    color: var(--wb-ink);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hypit-ref-meta span {
+    font-size: var(--fs-caption);
+    color: var(--wb-ink-3);
+}
+
+.hypit-url-row {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.hypit-url-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 34px;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--wb-muted);
+    color: var(--wb-ink);
+    font-size: var(--fs-ui);
+    outline: none;
+}
+
+.hypit-url-row input::placeholder {
+    color: var(--wb-ink-3);
+}
+
+.hypit-url-row input:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--wb-selected-line);
+}
+
+/* ---------- 结果卡片 ---------- */
+.hypit-tasks {
+    display: grid;
+    gap: var(--space-3);
+}
+
+.hypit-task {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-radius: var(--r-xl);
+    background: var(--wb-muted);
+}
+
+.hypit-task-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.hypit-task-mode {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    font-size: var(--fs-ui);
+    font-weight: 500;
+    color: var(--wb-ink);
+}
+
+.hypit-task-mode span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hypit-status {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--wb-panel);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--wb-ink-2);
+}
+
+.hypit-status.is-running {
+    color: var(--product-accent-amber, #b45309);
+}
+
+.hypit-status.is-succeeded {
+    color: var(--product-accent-green, #15803d);
+}
+
+.hypit-status.is-failed {
+    color: var(--product-accent-red, #b91c1c);
+}
+
+.hypit-task-brief {
+    margin: 0;
+    font-size: var(--fs-caption);
+    line-height: 1.6;
+    color: var(--wb-ink-3);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.hypit-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--wb-panel);
+    overflow: hidden;
+}
+
+.hypit-progress i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--wb-selected-bg);
+    transition: width var(--wb-motion);
+}
+
+.hypit-task video {
+    width: 100%;
+    max-height: 420px;
+    border-radius: var(--r-lg);
+    background: var(--wb-stage);
+}
+
+.hypit-task-error {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--product-accent-red, #b91c1c) 8%, transparent);
+    font-size: var(--fs-caption);
+    line-height: 1.6;
+    color: var(--product-accent-red, #b91c1c);
+}
+
+.hypit-task-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-size: var(--fs-caption);
+    color: var(--wb-ink-3);
+}
+
+/* ---------- 执行节点提示 ---------- */
+.hypit-node {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--product-accent-amber, #b45309) 10%, transparent);
+    font-size: var(--fs-caption);
+    line-height: 1.6;
+    color: var(--product-accent-amber, #b45309);
+}
+
+.hypit-node svg {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    margin-top: 1px;
+    stroke-width: 1.8;
+}
+
+/* ---------- 提交栏 ---------- */
+.hypit-submit {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    border-top: 1px solid color-mix(in srgb, var(--wb-line) 70%, transparent);
+}
+
+.hypit-submit-hint {
+    font-size: var(--fs-caption);
+    line-height: 1.6;
+    color: var(--wb-ink-3);
+}
+
+@media (max-width: 900px) {
+    .hypit-stage {
+        min-height: 320px;
+    }
+}

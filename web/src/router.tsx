@@ -57,6 +57,7 @@ const SharedCanvasPage = lazy(() => import("@/pages/canvas/shared"));
 const CreatePage = lazy(loadCreatePage);
 const ImageWorkbenchPage = lazy(() => import("@/pages/workbench/image-workbench-route"));
 const VideoWorkbenchPage = lazy(() => import("@/pages/workbench/video-workbench-page"));
+const HypitWorkbenchPage = lazy(() => import("@/pages/hypit/hypit-workbench-page"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const SkillsPage = lazy(() => import("@/pages/skills"));
 const SkillWorkbenchPage = lazy(loadSkillWorkbenchPage);
@@ -145,6 +146,14 @@ export const router = createBrowserRouter([
                 element: (
                     <RequireAuth>
                         <RequireFeature feature="videoWorkbenchEnabled">{deferred(<VideoWorkbenchPage />)}</RequireFeature>
+                    </RequireAuth>
+                ),
+            },
+            {
+                path: "/toolbox/hypit",
+                element: (
+                    <RequireAuth>
+                        <RequireFeature feature="hypitWorkbenchEnabled">{deferred(<HypitWorkbenchPage />)}</RequireFeature>
                     </RequireAuth>
                 ),
             },

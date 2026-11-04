@@ -28,7 +28,7 @@ func legacyMigrationCompatEnabled() bool {
 	}
 }
 
-const CurrentSchemaVersion int64 = 79
+const CurrentSchemaVersion int64 = 80
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -293,6 +293,21 @@ var schemaMigrations = []migration{
 	{version: 78, name: "ecommerce_agent_and_knowledge", checksum: "sha256:ecommerce-agent-and-knowledge-v78-20261101", apply: migrateEcommerceFeature},
 	// 上游 v1.7.3.4 的 drama_cast_voice_looks 原本占用 78，与已上线的 ecommerce 迁移撞号，顺延为 79。
 	{version: 79, name: "drama_cast_voice_looks", checksum: "sha256:drama-cast-voice-looks-v79-20261101", apply: migrateDramaCastVoiceLooks},
+	{version: 80, name: "hypit_replica_tasks", checksum: "sha256:hypit-replica-tasks-v80-20261104", apply: migrateHypitReplicaTasks},
+}
+
+// migrateHypitReplicaTasks 建立视频复刻任务表与执行节点心跳表。
+// 任务只保存排队与展示所需字段；渲染上下文全部留在 Worker 侧。
+func migrateHypitReplicaTasks(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&model.HypitTask{}, &model.HypitWorker{}); err != nil {
+		return err
+	}
+	if tx.Migrator().HasTable(&model.HypitTask{}) && !tx.Migrator().HasIndex(&model.HypitTask{}, "idx_hypit_tasks_status_created") {
+		if err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_hypit_tasks_status_created ON hypit_tasks (status, created_at)").Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 // migrateDramaCastVoiceLooks 为短剧设定补角色声音（声音库条目与样本音频）和造型（所属角色、造型名、默认适用章节）。
 // 旧设定都是没有指定声音的角色本体，新增列写成零值。

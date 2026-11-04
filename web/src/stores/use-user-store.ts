@@ -43,6 +43,7 @@ export type FeatureAvailability = {
     inspirationSourcesVisible: boolean;
     imageWorkbenchEnabled: boolean;
     videoWorkbenchEnabled: boolean;
+    hypitWorkbenchEnabled: boolean;
     configured?: boolean;
     updatedBy?: string;
     updatedAt?: string;
@@ -60,6 +61,7 @@ export const defaultFeatureAvailability: FeatureAvailability = {
     inspirationSourcesVisible: true,
     imageWorkbenchEnabled: false,
     videoWorkbenchEnabled: false,
+    hypitWorkbenchEnabled: false,
 };
 
 type UserStore = {
