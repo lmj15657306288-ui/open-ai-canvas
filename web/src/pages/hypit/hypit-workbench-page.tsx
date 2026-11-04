@@ -1,26 +1,13 @@
-import { App, Button } from "antd";
-import {
-    ArrowLeftRight,
-    Check,
-    ChevronDown,
-    Clapperboard,
-    Download,
-    Info,
-    LibraryBig,
-    Link2,
-    Loader2,
-    Plus,
-    Sparkles,
-    TriangleAlert,
-    Upload,
-    Wand2,
-    X,
-    XCircle,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { App, Button, Input, Progress } from "antd";
+import { ArrowUp, Check, CircleAlert, Clapperboard, Download, FolderOpen, ImagePlus, LayoutGrid, Music, RefreshCw, RotateCcw, Upload, X, XCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { WorkspacePage } from "@/components/layout/workspace-page";
-import { Select } from "@/components/ui/base/select";
+import { WorkspaceState } from "@/components/layout/workspace-state";
+import { ModelPicker } from "@/components/model-picker";
+import { AntTooltip as Tooltip } from "@/components/ui/base/tooltip/ant-tooltip";
+import { cn } from "@/lib/utils";
+import { ChoiceChips, ComposerSection, SwitchRow } from "@/pages/workbench/workbench-composer";
 import {
     HYPIT_MODE_LABELS,
     HYPIT_STATUS_LABELS,
@@ -35,7 +22,10 @@ import {
     type HypitVoiceMode,
 } from "@/services/api/hypit";
 import { uploadResourceFile } from "@/services/api/resources";
+import { selectableModelsByCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 
+// 复用画布工作台的样式体系，保证与 /toolbox/image、/toolbox/video 完全同源。
+import "@/pages/workbench/workbench.css";
 import "./hypit-workbench.css";
 
 const POLL_INTERVAL_MS = 4000;
@@ -65,21 +55,21 @@ type ReplicaSpec = {
     tip: { good: string[]; bad: string[] };
     instructionPlaceholder: string;
     instructionMax: number;
-    checks: Array<{ key: "keepMusic" | "talkingHead"; label: string }>;
+    checks: Array<{ key: "keepMusic" | "talkingHead"; label: string; detail: string }>;
 };
 
-const CHECK_KEEP_MUSIC = { key: "keepMusic" as const, label: "保留参考视频的背景音乐" };
-const CHECK_TALKING = { key: "talkingHead" as const, label: "生成人物口播（重新配音，时长可能变长）" };
+const CHECK_KEEP_MUSIC = { key: "keepMusic" as const, label: "保留背景音乐", detail: "沿用参考视频的 BGM 与音效" };
+const CHECK_TALKING = { key: "talkingHead" as const, label: "生成人物口播", detail: "重新配音，时长可能变长" };
 
-/** 8 种替换类型：槽位、提示、字数上限都跟着类型走，和后端 hypitReplicaModes 一一对应。 */
+/** 8 种替换类型：槽位、提示、字数上限都跟着类型走，与后端 hypitReplicaModes 一一对应。 */
 const REPLICA_TYPES: ReplicaSpec[] = [
     {
         id: "model-swap",
         label: "模特替换",
         hint: "保留原片的动作、镜头与节奏，只把出镜模特换成你上传的人物",
         slots: [
-            { slot: "person", label: "人物全身图", hint: "正面全身", kind: "image", max: 3 },
-            { slot: "outfit", label: "服装参考", hint: "可选", kind: "image", max: 1 },
+            { slot: "person", label: "人物全身图", hint: "正面全身，单人入镜", kind: "image", max: 3 },
+            { slot: "outfit", label: "服装参考", hint: "可选，平铺或上身图", kind: "image", max: 1 },
         ],
         tip: {
             good: ["单人、正面站立、全身完整入镜", "背景干净、光线均匀，脸部无遮挡"],
@@ -95,7 +85,7 @@ const REPLICA_TYPES: ReplicaSpec[] = [
         hint: "人物不变，把身上的衣服换成你上传的款式",
         slots: [
             { slot: "outfit", label: "服装图", hint: "平铺或上身图", kind: "image", max: 3 },
-            { slot: "person", label: "人物图", hint: "可选", kind: "image", max: 1 },
+            { slot: "person", label: "人物图", hint: "可选，指定模特时上传", kind: "image", max: 1 },
         ],
         tip: {
             good: ["服装正面平铺图，图案与颜色完整", "需要指定模特时附带一张正面全身图"],
@@ -109,7 +99,7 @@ const REPLICA_TYPES: ReplicaSpec[] = [
         id: "face-swap",
         label: "人脸替换",
         hint: "只换脸，保留原片的服装、发型与身体动作",
-        slots: [{ slot: "face", label: "人脸图", hint: "正面清晰", kind: "image", max: 3 }],
+        slots: [{ slot: "face", label: "人脸图", hint: "正面清晰，光线均匀", kind: "image", max: 3 }],
         tip: {
             good: ["正面免冠，五官清晰，分辨率足够", "光线均匀，不带夸张滤镜"],
             bad: ["侧脸、仰头，或脸部被头发遮挡", "多人同框、卡通头像"],
@@ -122,9 +112,9 @@ const REPLICA_TYPES: ReplicaSpec[] = [
         id: "background-swap",
         label: "换背景",
         hint: "人物与动作不变，把场景背景换成你上传的图",
-        slots: [{ slot: "background", label: "背景图", hint: "横图更佳", kind: "image", max: 3 }],
+        slots: [{ slot: "background", label: "背景图", hint: "场景完整、无人物，横图更佳", kind: "image", max: 3 }],
         tip: {
-            good: ["场景完整、无人物，光线方向明确", "与人物景别匹配（室内 / 街景 / 纯色）"],
+            good: ["场景完整、没有其他人，光线方向明确", "与人物景别匹配（室内 / 街景 / 纯色）"],
             bad: ["背景里已有其他人或文字", "纯白无细节的空白图"],
         },
         instructionPlaceholder: "例如：换成图中的咖啡馆内景，保持原片的窗边自然光",
@@ -136,8 +126,8 @@ const REPLICA_TYPES: ReplicaSpec[] = [
         label: "商品替换",
         hint: "把片中主推的商品换成你的商品，人物与场景保留",
         slots: [
-            { slot: "product", label: "商品图", hint: "多角度更佳", kind: "image", max: 3 },
-            { slot: "scene", label: "场景参考", hint: "可选", kind: "image", max: 1 },
+            { slot: "product", label: "商品图", hint: "白底图或多角度", kind: "image", max: 3 },
+            { slot: "scene", label: "场景参考", hint: "可选，使用场景图", kind: "image", max: 1 },
         ],
         tip: {
             good: ["商品白底图 + 一张使用场景图", "包装文字清晰，颜色还原真实"],
@@ -152,14 +142,14 @@ const REPLICA_TYPES: ReplicaSpec[] = [
         label: "精准商品",
         hint: "强约束商品外观，包装文字与 logo 尽量不走样",
         slots: [
-            { slot: "product", label: "商品图", hint: "正面 + 细节", kind: "image", max: 3 },
-            { slot: "label", label: "包装文字", hint: "可选", kind: "image", max: 1 },
+            { slot: "product", label: "商品图", hint: "正面 + 细节各一张", kind: "image", max: 3 },
+            { slot: "label", label: "包装文字", hint: "可选，文字特写", kind: "image", max: 1 },
         ],
         tip: {
             good: ["同一商品的正反面各一张", "包装上的文字单独拍一张特写"],
-            bad: ["压缩过的电商截图，文字已糊"],
+            bad: ["压缩过的电商截图，文字已经糊了"],
         },
-        instructionPlaceholder: "例如：包装文字原样保留，不要改写 logo",
+        instructionPlaceholder: "包装文字原样保留",
         instructionMax: 10,
         checks: [CHECK_KEEP_MUSIC],
     },
@@ -169,13 +159,13 @@ const REPLICA_TYPES: ReplicaSpec[] = [
         hint: "强约束五官与身材比例，适合固定出镜人设",
         slots: [
             { slot: "person", label: "人物全身图", hint: "正面全身", kind: "image", max: 3 },
-            { slot: "face", label: "人脸特写", hint: "可选", kind: "image", max: 1 },
+            { slot: "face", label: "人脸特写", hint: "可选，正脸特写", kind: "image", max: 1 },
         ],
         tip: {
             good: ["同一人的全身图 + 一张正脸特写", "服装简单，避免大面积花纹"],
             bad: ["不同人的照片混着传", "重度美颜或换脸滤镜"],
         },
-        instructionPlaceholder: "例如：保持五官一致，不要改变脸型",
+        instructionPlaceholder: "保持五官一致",
         instructionMax: 10,
         checks: [CHECK_KEEP_MUSIC, CHECK_TALKING],
     },
@@ -198,27 +188,23 @@ const REPLICA_TYPES: ReplicaSpec[] = [
     },
 ];
 
-const VOICE_OPTIONS: Array<{ value: HypitVoiceMode; label: string; hint: string }> = [
-    { value: "replace", label: HYPIT_VOICE_LABELS.replace, hint: "上传音频后替换原片人声" },
-    { value: "original", label: HYPIT_VOICE_LABELS.original, hint: "保留原片人声与语气" },
-    { value: "mute", label: HYPIT_VOICE_LABELS.mute, hint: "去掉人声，只留环境音" },
+const VOICE_OPTIONS: Array<{ value: HypitVoiceMode; label: string; caption: string }> = [
+    { value: "replace", label: HYPIT_VOICE_LABELS.replace, caption: "上传音频替换人声" },
+    { value: "original", label: HYPIT_VOICE_LABELS.original, caption: "保留原片人声" },
+    { value: "mute", label: HYPIT_VOICE_LABELS.mute, caption: "只留环境音" },
 ];
 
-const MODEL_OPTIONS = [
-    { value: "veo-3.1-fast", label: "Veo 3.1 Fast" },
-    { value: "veo-3.1-pro", label: "Veo 3.1 Pro" },
-    { value: "kling-2.5-turbo", label: "Kling 2.5 Turbo" },
-    { value: "sora-2", label: "Sora 2" },
+const RATIO_OPTIONS = [
+    { value: "9:16", label: "9:16", caption: "竖屏" },
+    { value: "16:9", label: "16:9", caption: "横屏" },
+    { value: "1:1", label: "1:1", caption: "方形" },
+    { value: "3:4", label: "3:4", caption: "竖版" },
 ];
 
-/** 画幅与清晰度合成一个下拉，值形如 `9:16|720p`。 */
-const RATIO_RESOLUTION_OPTIONS = [
-    { value: "9:16|480p", label: "竖屏 9:16 · 480P" },
-    { value: "9:16|720p", label: "竖屏 9:16 · 720P" },
-    { value: "9:16|1080p", label: "竖屏 9:16 · 1080P" },
-    { value: "16:9|720p", label: "横屏 16:9 · 720P" },
-    { value: "1:1|720p", label: "方形 1:1 · 720P" },
-    { value: "3:4|720p", label: "竖版 3:4 · 720P" },
+const RESOLUTION_OPTIONS = [
+    { value: "480p", label: "480P", caption: "草稿" },
+    { value: "720p", label: "720P", caption: "常规" },
+    { value: "1080p", label: "1080P", caption: "高清" },
 ];
 
 function formatSize(bytes?: number): string {
@@ -236,29 +222,100 @@ function isHttpURL(value: string): boolean {
     }
 }
 
-function taskBrief(task: HypitTask): string {
-    const parts = [HYPIT_MODE_LABELS[task.mode] ?? task.mode];
-    if (task.aspectRatio) parts.push(`${task.aspectRatio}${task.resolution ? ` · ${task.resolution}` : ""}`);
-    if (task.voiceMode) parts.push(HYPIT_VOICE_LABELS[task.voiceMode] ?? task.voiceMode);
-    if (task.instructions.trim()) parts.push(task.instructions.trim());
-    else if (task.referenceName) parts.push(task.referenceName);
-    return parts.join(" · ");
+function taskChips(task: HypitTask): string[] {
+    const chips = [HYPIT_MODE_LABELS[task.mode] ?? task.mode];
+    if (task.aspectRatio) chips.push(`${task.aspectRatio}${task.resolution ? ` · ${task.resolution}` : ""}`);
+    if (task.voiceMode) chips.push(HYPIT_VOICE_LABELS[task.voiceMode] ?? task.voiceMode);
+    if (task.keepMusic) chips.push("保留音乐");
+    if (task.talkingHead) chips.push("人物口播");
+    return chips;
 }
 
-function SectionTitle({ title, hint, extra }: { title: string; hint?: string; extra?: ReactNode }) {
+/** 单个素材槽位：复用画布的 wb-slot / wb-ref 结构，空态是 wb-drop，有图后是缩略图 + 追加按钮。 */
+function MaterialSlot({
+    slot,
+    items,
+    required,
+    uploading,
+    percent,
+    onPick,
+    onLibrary,
+    onRemove,
+}: {
+    slot: SlotSpec;
+    items: MaterialItem[];
+    required: boolean;
+    uploading: boolean;
+    percent: number;
+    onPick: () => void;
+    onLibrary: () => void;
+    onRemove: (resourceId: string) => void;
+}) {
+    const full = items.length >= slot.max;
+    const missing = required && items.length === 0;
     return (
-        <div className="hp-block-head">
-            <div className="hp-block-title">
-                <h3>{title}</h3>
-                {hint ? <span title={hint}>{hint}</span> : null}
+        <div className={cn("wb-slot", missing && "is-missing")}>
+            <div className="wb-slot-head">
+                <strong>{slot.label}</strong>
+                <span className={cn("wb-badge", required && "is-required")}>{required ? "必填" : "可选"}</span>
+                <small>
+                    {items.length} / {slot.max}
+                </small>
             </div>
-            {extra}
+            <div className="wb-ref-row">
+                {items.map((item) => (
+                    <div key={item.resourceId} className="wb-ref">
+                        <span className="wb-ref-media">
+                            {item.previewUrl ? (
+                                <img src={item.previewUrl} alt={item.name} />
+                            ) : (
+                                <span className="wb-ref-audio">
+                                    <Music aria-hidden />
+                                </span>
+                            )}
+                        </span>
+                        <button type="button" className="wb-ref-remove" aria-label={`移除${item.name}`} onClick={() => onRemove(item.resourceId)}>
+                            <X aria-hidden />
+                        </button>
+                    </div>
+                ))}
+                {uploading ? (
+                    <div className="wb-ref">
+                        <span className="wb-ref-media">
+                            <span className="wb-ref-progress">{percent}%</span>
+                        </span>
+                    </div>
+                ) : null}
+                {full ? null : items.length ? (
+                    <Tooltip title={`继续上传${slot.label}`}>
+                        <button type="button" className="wb-ref-add" data-icon-only aria-label={`继续上传${slot.label}`} onClick={onPick}>
+                            <ImagePlus aria-hidden />
+                        </button>
+                    </Tooltip>
+                ) : (
+                    <button type="button" className="wb-drop" onClick={onPick}>
+                        <span className="wb-drop-icon">
+                            <ImagePlus aria-hidden />
+                        </span>
+                        <span className="wb-drop-copy">
+                            <strong>上传{slot.label}</strong>
+                            <small>{slot.hint}</small>
+                        </span>
+                    </button>
+                )}
+                <button type="button" className="wb-ref-library" aria-label={`从素材库选择${slot.label}`} title={full ? "已达到数量上限" : "一次选多张批量导入"} disabled={full} onClick={onLibrary}>
+                    <FolderOpen aria-hidden />
+                    <small>素材库</small>
+                </button>
+            </div>
         </div>
     );
 }
 
 export default function HypitWorkbenchPage() {
     const { message } = App.useApp();
+    const config = useEffectiveConfig();
+    const updateConfig = useConfigStore((state) => state.updateConfig);
     const refFileRef = useRef<HTMLInputElement | null>(null);
     const slotFileRef = useRef<HTMLInputElement | null>(null);
     const libraryFileRef = useRef<HTMLInputElement | null>(null);
@@ -266,17 +323,15 @@ export default function HypitWorkbenchPage() {
     const previewsRef = useRef<string[]>([]);
 
     const [typeID, setTypeID] = useState<HypitReplicaMode>("model-swap");
-    const [pickerOpen, setPickerOpen] = useState(true);
-    const [tipOpen, setTipOpen] = useState(true);
     const [materials, setMaterials] = useState<Record<string, MaterialItem[]>>({});
-
     const [reference, setReference] = useState<Reference | null>(null);
     const [urlDraft, setUrlDraft] = useState("");
     const [voiceMode, setVoiceMode] = useState<HypitVoiceMode>("original");
     const [keepMusic, setKeepMusic] = useState(true);
     const [talkingHead, setTalkingHead] = useState(false);
-    const [model, setModel] = useState(MODEL_OPTIONS[0].value);
-    const [ratioResolution, setRatioResolution] = useState(RATIO_RESOLUTION_OPTIONS[1].value);
+    const [model, setModel] = useState("");
+    const [aspectRatio, setAspectRatio] = useState("9:16");
+    const [resolution, setResolution] = useState("720p");
     const [instructions, setInstructions] = useState("");
 
     const [uploadingTarget, setUploadingTarget] = useState<string | null>(null);
@@ -291,6 +346,15 @@ export default function HypitWorkbenchPage() {
     const spec = useMemo(() => REPLICA_TYPES.find((item) => item.id === typeID) ?? REPLICA_TYPES[0], [typeID]);
     const activeTask = useMemo(() => tasks.find(hypitTaskIsActive) ?? null, [tasks]);
     const totalMaterials = useMemo(() => Object.values(materials).reduce((sum, items) => sum + items.length, 0), [materials]);
+
+    // 模型目录直接取画布当前生效的渠道配置，和创作页同一份可选列表。
+    const models = useMemo(() => selectableModelsByCapability(config, "video"), [config]);
+    const configuredModel = config.videoModel || config.model || "";
+    const selectedModel = useMemo(() => {
+        if (model && models.includes(model)) return model;
+        if (configuredModel && models.includes(configuredModel)) return configuredModel;
+        return models[0] || "";
+    }, [configuredModel, model, models]);
 
     useEffect(() => {
         return () => {
@@ -325,24 +389,24 @@ export default function HypitWorkbenchPage() {
 
     /** 声音选「替换音频」时，在素材区多出一个音频槽位。 */
     const voiceSlots: SlotSpec[] = useMemo(
-        () => (voiceMode === "replace" ? [{ slot: "voice", label: "音频文件", hint: "mp3 / wav", kind: "audio", max: 1 }] : []),
+        () => (voiceMode === "replace" ? [{ slot: "voice", label: "替换音频", hint: "mp3 / wav，选填时长接近原片", kind: "audio", max: 1 }] : []),
         [voiceMode],
     );
     const activeSlots = useMemo(() => [...spec.slots, ...voiceSlots], [spec, voiceSlots]);
 
-    const slotLimit = useCallback(
-        (slot: string): number => activeSlots.find((item) => item.slot === slot)?.max ?? MAX_PER_SLOT,
-        [activeSlots],
-    );
+    const slotLimit = useCallback((slot: string): number => activeSlots.find((item) => item.slot === slot)?.max ?? MAX_PER_SLOT, [activeSlots]);
 
-    const appendMaterials = useCallback((slot: string, items: MaterialItem[]) => {
-        setMaterials((current) => {
-            const existing = current[slot] ?? [];
-            const limit = Math.min(slotLimit(slot), MAX_TOTAL_MATERIALS - (totalMaterials - existing.length));
-            const next = [...existing, ...items].slice(0, Math.max(limit, existing.length));
-            return { ...current, [slot]: next };
-        });
-    }, [slotLimit, totalMaterials]);
+    const appendMaterials = useCallback(
+        (slot: string, items: MaterialItem[]) => {
+            setMaterials((current) => {
+                const existing = current[slot] ?? [];
+                const limit = Math.min(slotLimit(slot), MAX_TOTAL_MATERIALS - (totalMaterials - existing.length));
+                const next = [...existing, ...items].slice(0, Math.max(limit, existing.length));
+                return { ...current, [slot]: next };
+            });
+        },
+        [slotLimit, totalMaterials],
+    );
 
     const uploadToSlot = useCallback(
         async (slot: string, files: File[]) => {
@@ -395,24 +459,21 @@ export default function HypitWorkbenchPage() {
         input.click();
     }, []);
 
-    const removeSlot = useCallback((slot: string) => {        setMaterials((current) => {
-            (current[slot] ?? []).forEach((item) => {
-                if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-            });
-            return { ...current, [slot]: [] };
+    const removeMaterial = useCallback((slot: string, resourceId: string) => {
+        setMaterials((current) => {
+            const items = current[slot] ?? [];
+            const target = items.find((item) => item.resourceId === resourceId);
+            if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+            return { ...current, [slot]: items.filter((item) => item.resourceId !== resourceId) };
         });
     }, []);
 
-    /** 素材库按钮：一次选多张图，按当前类型的槽位顺序自动分配。 */
-    const importFromLibrary = useCallback(
-        async (files: File[]) => {
-            if (files.length === 0) return;
-            const firstSlot = spec.slots[0]?.slot;
-            if (!firstSlot) return;
-            await uploadToSlot(firstSlot, files);
-        },
-        [spec, uploadToSlot],
-    );
+    const clearMaterials = useCallback(() => {
+        setMaterials((current) => {
+            Object.values(current).forEach((items) => items.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl)));
+            return {};
+        });
+    }, []);
 
     const pickReferenceFile = useCallback(
         async (file: File) => {
@@ -461,21 +522,34 @@ export default function HypitWorkbenchPage() {
         setReference({ source: "url", url: value, name });
     }, [urlDraft, message]);
 
+    const resetComposer = useCallback(() => {
+        clearMaterials();
+        setReference(null);
+        setUrlDraft("");
+        setInstructions("");
+        setVoiceMode("original");
+        setKeepMusic(true);
+        setTalkingHead(false);
+        setAspectRatio("9:16");
+        setResolution("720p");
+    }, [clearMaterials]);
+
+    const primarySlot = spec.slots[0];
+    const disabledReason = !reference
+        ? "先选一个参考视频"
+        : primarySlot && (materials[primarySlot.slot]?.length ?? 0) === 0
+          ? `请上传${primarySlot.label}`
+          : voiceMode === "replace" && (materials.voice?.length ?? 0) === 0
+            ? "选择「替换音频」后需要上传一段音频"
+            : !selectedModel
+              ? "当前没有可用的视频模型，请先在模型设置里配置渠道"
+              : undefined;
+
     const submit = useCallback(async () => {
-        if (!reference) {
-            message.warning("请先上传参考视频，或粘贴视频链接后点「解析视频」");
+        if (!reference || disabledReason) {
+            if (disabledReason) message.warning(disabledReason);
             return;
         }
-        const primary = spec.slots[0];
-        if (primary && (materials[primary.slot]?.length ?? 0) === 0) {
-            message.warning(`请先上传${primary.label}`);
-            return;
-        }
-        if (voiceMode === "replace" && (materials.voice?.length ?? 0) === 0) {
-            message.warning("选择「替换音频」后需要上传一段音频");
-            return;
-        }
-        const [aspectRatio, resolution] = ratioResolution.split("|");
         const payloadMaterials: HypitMaterialSlot[] = Object.entries(materials)
             .map(([slot, items]) => ({ slot, resourceIds: items.map((item) => item.resourceId) }))
             .filter((item) => item.resourceIds.length > 0);
@@ -488,7 +562,7 @@ export default function HypitWorkbenchPage() {
                 referenceUrl: reference.source === "url" ? reference.url : undefined,
                 referenceName: reference.name,
                 instructions: instructions.trim(),
-                model,
+                model: selectedModel,
                 aspectRatio,
                 resolution,
                 materials: payloadMaterials,
@@ -503,7 +577,7 @@ export default function HypitWorkbenchPage() {
         } finally {
             setSubmitting(false);
         }
-    }, [instructions, keepMusic, materials, message, model, ratioResolution, reference, spec, talkingHead, typeID, voiceMode]);
+    }, [aspectRatio, disabledReason, instructions, keepMusic, materials, message, reference, resolution, selectedModel, talkingHead, typeID, voiceMode]);
 
     const cancel = useCallback(
         async (task: HypitTask) => {
@@ -517,285 +591,219 @@ export default function HypitWorkbenchPage() {
         [message],
     );
 
-    const busy = uploadingTarget !== null || submitting;
-    const renderSlots = activeSlots;
+    const busy = submitting;
 
     return (
         <WorkspacePage fluid scroll={false} className="wb-page">
-            <div className="hypit-shell">
-                <aside className="hp-form" aria-label="视频复刻面板">
-                    <div className="hp-form-scroll">
-                        <div className="hp-func">
-                            <span className="hp-func-icon">
-                                <Wand2 aria-hidden />
-                            </span>
-                            <div className="hp-func-body">
-                                <strong>{spec.label}</strong>
-                                <span>{spec.hint}</span>
-                            </div>
-                            <button type="button" className="hp-func-switch" onClick={() => setPickerOpen((open) => !open)}>
-                                <ArrowLeftRight aria-hidden />
-                                {pickerOpen ? "收起" : "切换"}
+            <div className="wb-shell" data-kind="video">
+                <aside className="wb-composer" aria-label="视频复刻面板">
+                    <header className="wb-composer-head">
+                        <strong className="wb-composer-title">视频复刻</strong>
+                        <Tooltip title="清空素材、参考视频和参数（结果不受影响）">
+                            <button type="button" className="wb-icon-button" data-icon-only aria-label="重置复刻面板" onClick={resetComposer}>
+                                <RotateCcw />
                             </button>
-                        </div>
+                        </Tooltip>
+                    </header>
 
-                        {pickerOpen ? (
-                            <div className="hp-block">
-                                <SectionTitle title="替换类型" hint={`${REPLICA_TYPES.length} 种`} />
-                                <div className="hp-chips">
-                                    {REPLICA_TYPES.map((item) => (
-                                        <button
-                                            key={item.id}
-                                            type="button"
-                                            className="hp-chip"
-                                            aria-pressed={item.id === typeID}
-                                            title={item.hint}
-                                            onClick={() => setTypeID(item.id)}
-                                        >
-                                            {item.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : null}
-
-                        <div className="hp-block">
-                            <SectionTitle title="素材" hint={`共 ${totalMaterials}/${MAX_TOTAL_MATERIALS} 张`} />
-                            <div className="hp-slots">
-                                {renderSlots.map((slot) => {
-                                    const items = materials[slot.slot] ?? [];
-                                    const uploading = uploadingTarget === slot.slot;
-                                    return (
-                                        <div
-                                            key={slot.slot}
-                                            className={`hp-slot${items.length ? " is-filled" : ""}`}
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-label={`上传${slot.label}`}
-                                            onClick={() => {
-                                                if (uploading) return;
-                                                openSlotPicker(slot.slot, slot.kind);
-                                            }}
-                                            onKeyDown={(event) => {
-                                                if (event.key === "Enter" || event.key === " ") {
-                                                    openSlotPicker(slot.slot, slot.kind);
-                                                }
-                                            }}
-                                        >
-                                            {uploading ? (
-                                                <>
-                                                    <Loader2 className="animate-spin" aria-hidden />
-                                                    <span className="hp-slot-label">{uploadPercent}%</span>
-                                                    <span className="hp-slot-note">上传中</span>
-                                                </>
-                                            ) : items.length ? (
-                                                <>
-                                                    {items[0].previewUrl ? <img src={items[0].previewUrl} alt={items[0].name} /> : <Clapperboard aria-hidden />}
-                                                    <span className="hp-slot-badge">{slot.label}</span>
-                                                    {slot.max > 1 ? (
-                                                        <span className="hp-slot-count">
-                                                            {items.length}/{slot.max}
-                                                        </span>
-                                                    ) : null}
-                                                    <button
-                                                        type="button"
-                                                        className="hp-slot-remove"
-                                                        aria-label={`清空${slot.label}`}
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            removeSlot(slot.slot);
-                                                        }}
-                                                    >
-                                                        <X aria-hidden />
-                                                    </button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <span className="hp-slot-plus">
-                                                        <Plus aria-hidden />
-                                                    </span>
-                                                    <span className="hp-slot-label">{slot.label}</span>
-                                                    <span className="hp-slot-note">{slot.hint}</span>
-                                                </>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            <div className="hp-material-foot">
-                                <button
-                                    type="button"
-                                    className="hp-library-button"
-                                    onClick={() => libraryFileRef.current?.click()}
-                                >
-                                    <LibraryBig aria-hidden />
-                                    素材库
-                                </button>
-                                <span className="hp-slot-note">单个槽位最多 3 张，素材库支持多选批量导入</span>
-                            </div>
-                        </div>
-
-                        <div className="hp-block">
-                            <div className={`hp-tip${tipOpen ? " is-open" : ""}`}>
-                                <button type="button" className="hp-tip-head" onClick={() => setTipOpen((open) => !open)}>
-                                    <Info aria-hidden />
-                                    素材怎么选，效果才稳
-                                    <ChevronDown className="hp-tip-chevron" aria-hidden />
-                                </button>
-                                {tipOpen ? (
-                                    <div className="hp-tip-body">
-                                        {spec.tip.good.map((text) => (
-                                            <div key={text} className="hp-tip-row is-good">
-                                                <Check aria-hidden />
-                                                <b>推荐</b>
-                                                <span>{text}</span>
-                                            </div>
-                                        ))}
-                                        {spec.tip.bad.map((text) => (
-                                            <div key={text} className="hp-tip-row is-bad">
-                                                <XCircle aria-hidden />
-                                                <b>避免</b>
-                                                <span>{text}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        </div>
-
-                        <div className="hp-block">
-                            <SectionTitle title="参考视频" hint="限 1 个 · MP4 / MOV" />
-                            <div className="hp-ref">
-                                {reference ? (
-                                    <div className="hp-ref-selected">
-                                        <span className="hp-slot-badge" style={{ position: "static" }}>
-                                            {reference.source === "url" ? "链接" : "本地"}
-                                        </span>
-                                        <span className="hp-ref-selected-meta">
-                                            <strong title={reference.name}>{reference.name}</strong>
-                                            <span>{reference.source === "url" ? "由链接解析" : `本地上传${reference.size ? ` · ${formatSize(reference.size)}` : ""}`}</span>
-                                        </span>
-                                        <button type="button" className="hp-mini-button" onClick={() => setReference(null)}>
-                                            <X aria-hidden />
-                                            移除
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div
-                                            className="hp-ref-upload"
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={() => refFileRef.current?.click()}
-                                            onKeyDown={(event) => {
-                                                if (event.key === "Enter" || event.key === " ") refFileRef.current?.click();
-                                            }}
-                                        >
-                                            {uploadingTarget === "reference" ? (
-                                                <>
-                                                    <Loader2 className="animate-spin" aria-hidden />
-                                                    <b>{uploadPercent}%</b>
-                                                    <small>上传中</small>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Upload aria-hidden />
-                                                    <b>本地上传</b>
-                                                    <small>MP4 / MOV</small>
-                                                </>
-                                            )}
-                                        </div>
-                                        <span className="hp-ref-sep">或</span>
-                                        <div className="hp-ref-link">
-                                            <textarea
-                                                value={urlDraft}
-                                                onChange={(event) => setUrlDraft(event.target.value)}
-                                                placeholder="粘贴视频链接，支持抖音 / 小红书 / B 站分享链接"
-                                                aria-label="参考视频链接"
-                                            />
-                                            <div className="hp-ref-actions">
-                                                <button type="button" onClick={() => void pasteFromClipboard()}>
-                                                    一键粘贴
-                                                </button>
-                                                <button type="button" className="is-parse" disabled={!urlDraft.trim()} onClick={applyUrlReference}>
-                                                    <Link2 aria-hidden style={{ width: 12, height: 12, verticalAlign: "-1px" }} /> 解析视频
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="hp-block">
-                            <SectionTitle title="声音" hint="怎么处理原片人声" />
-                            <div className="hp-voice">
-                                {VOICE_OPTIONS.map((item) => (
-                                    <button
-                                        key={item.value}
-                                        type="button"
-                                        className="hp-voice-card"
-                                        aria-pressed={voiceMode === item.value}
-                                        onClick={() => setVoiceMode(item.value)}
-                                    >
-                                        <b>{item.label}</b>
-                                        <span>{item.hint}</span>
-                                    </button>
+                    <div className="wb-composer-scroll">
+                        <ComposerSection title="替换类型" hint="选一种要替换的内容">
+                            <ChoiceChips label="替换类型" value={typeID} columns={4} options={REPLICA_TYPES.map((item) => ({ value: item.id, label: item.label, caption: item.slots[0]?.label, title: item.hint }))} onChange={(value) => setTypeID(value as HypitReplicaMode)} />
+                            <p className="wb-muted-note">{spec.hint}</p>
+                            <div className="hypit-tip">
+                                {spec.tip.good.map((text) => (
+                                    <span key={text} className="hypit-tip-row is-good">
+                                        <Check aria-hidden />
+                                        {text}
+                                    </span>
+                                ))}
+                                {spec.tip.bad.map((text) => (
+                                    <span key={text} className="hypit-tip-row is-bad">
+                                        <XCircle aria-hidden />
+                                        {text}
+                                    </span>
                                 ))}
                             </div>
-                            {voiceMode === "replace" ? (
-                                <p className="hp-block-hint">选好「替换音频」后，在上方「音频文件」槽位上传要用的配音。</p>
-                            ) : null}
-                        </div>
+                        </ComposerSection>
 
-                        <div className="hp-block">
-                            <SectionTitle title="输出设置" />
-                            <div className="hp-selects">
-                                <label className="hp-field">
-                                    <span className="hp-field-label">视频模型</span>
-                                    <Select ariaLabel="视频模型" value={model} onChange={setModel} options={MODEL_OPTIONS} />
-                                </label>
-                                <label className="hp-field">
-                                    <span className="hp-field-label">画幅 · 清晰度</span>
-                                    <Select ariaLabel="画幅与清晰度" value={ratioResolution} onChange={setRatioResolution} options={RATIO_RESOLUTION_OPTIONS} />
-                                </label>
-                            </div>
-                            {spec.checks.map((item) => (
-                                <label key={item.key} className="hp-check">
-                                    <input
-                                        type="checkbox"
-                                        checked={item.key === "keepMusic" ? keepMusic : talkingHead}
-                                        onChange={(event) => {
-                                            if (item.key === "keepMusic") setKeepMusic(event.target.checked);
-                                            else setTalkingHead(event.target.checked);
+                        <ComposerSection
+                            title="素材"
+                            hint={`${totalMaterials} / ${MAX_TOTAL_MATERIALS} 张 · 单槽最多 3 张`}
+                            aside={
+                                totalMaterials ? (
+                                    <Button size="small" type="text" className="wb-text-action" onClick={clearMaterials}>
+                                        清空
+                                    </Button>
+                                ) : null
+                            }
+                        >
+                            <div className="wb-slot-list">
+                                {activeSlots.map((slot) => (
+                                    <MaterialSlot
+                                        key={slot.slot}
+                                        slot={slot}
+                                        items={materials[slot.slot] ?? []}
+                                        required={spec.slots[0]?.slot === slot.slot}
+                                        uploading={uploadingTarget === slot.slot}
+                                        percent={uploadPercent}
+                                        onPick={() => openSlotPicker(slot.slot, slot.kind)}
+                                        onLibrary={() => {
+                                            libraryFileRef.current?.setAttribute("data-slot", slot.slot);
+                                            libraryFileRef.current?.click();
                                         }}
+                                        onRemove={(resourceId) => removeMaterial(slot.slot, resourceId)}
                                     />
-                                    <span>{item.label}</span>
-                                </label>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        </ComposerSection>
 
-                        <div className="hp-block">
-                            <SectionTitle title="补充说明" hint="可选" />
-                            <div className="hp-inst">
+                        <ComposerSection
+                            title="参考视频"
+                            hint="限 1 个 · MP4 / MOV / WebM"
+                            aside={
+                                reference ? (
+                                    <Button size="small" type="text" className="wb-text-action" onClick={() => setReference(null)}>
+                                        移除
+                                    </Button>
+                                ) : null
+                            }
+                        >
+                            <div className="wb-ref-row">
+                                {reference ? (
+                                    <div className="wb-ref">
+                                        <span className="wb-ref-media">
+                                            <span className="hypit-ref-glyph">
+                                                <Clapperboard aria-hidden />
+                                            </span>
+                                        </span>
+                                    </div>
+                                ) : uploadingTarget === "reference" ? (
+                                    <div className="wb-ref">
+                                        <span className="wb-ref-media">
+                                            <span className="wb-ref-progress">{uploadPercent}%</span>
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <button type="button" className="wb-drop" onClick={() => refFileRef.current?.click()}>
+                                        <span className="wb-drop-icon">
+                                            <Upload aria-hidden />
+                                        </span>
+                                        <span className="wb-drop-copy">
+                                            <strong>本地上传参考视频</strong>
+                                            <small>建议 30 秒以内，镜头过多时先分镜</small>
+                                        </span>
+                                    </button>
+                                )}
+                                <button type="button" className="wb-ref-library" onClick={() => void pasteFromClipboard()}>
+                                    <Clapperboard aria-hidden />
+                                    <small>粘贴链接</small>
+                                </button>
+                            </div>
+                            {reference ? (
+                                <p className="wb-muted-note">
+                                    {reference.name}
+                                    {reference.source === "url" ? " · 来自链接" : reference.size ? ` · ${formatSize(reference.size)}` : " · 本地上传"}
+                                </p>
+                            ) : (
+                                <div className="hypit-link-row">
+                                    <Input size="small" allowClear value={urlDraft} placeholder="或粘贴视频链接，支持抖音 / 小红书 / B 站分享链接" onChange={(event) => setUrlDraft(event.target.value)} onPressEnter={applyUrlReference} />
+                                    <Button size="small" disabled={!urlDraft.trim()} onClick={applyUrlReference}>
+                                        解析视频
+                                    </Button>
+                                </div>
+                            )}
+                        </ComposerSection>
+
+                        <ComposerSection title="声音" hint="怎么处理原片人声">
+                            <ChoiceChips label="声音" value={voiceMode} options={VOICE_OPTIONS.map((item) => ({ value: item.value, label: item.label, caption: item.caption }))} onChange={(value) => setVoiceMode(value as HypitVoiceMode)} />
+                        </ComposerSection>
+
+                        <ComposerSection title="模型与规格" hint="模型来自画布渠道配置">
+                            {models.length ? (
+                                <ModelPicker
+                                    config={config}
+                                    value={selectedModel}
+                                    capability="video"
+                                    variant="creation"
+                                    fullWidth
+                                    className="creation-model-picker wb-model-picker"
+                                    showSelectedPrice={false}
+                                    showOptionPrices
+                                    placeholder="选择视频模型"
+                                    onChange={(value) => {
+                                        setModel(value);
+                                        updateConfig("videoModel", value);
+                                        updateConfig("model", value);
+                                    }}
+                                />
+                            ) : (
+                                <div className="wb-inline-error">
+                                    <span>暂无可用的视频模型</span>
+                                    <a href="/settings?section=models" target="_blank" rel="noreferrer">
+                                        去模型设置
+                                    </a>
+                                </div>
+                            )}
+                            <ChoiceChips label="画幅" value={aspectRatio} options={RATIO_OPTIONS} onChange={setAspectRatio} />
+                            <ChoiceChips label="清晰度" value={resolution} options={RESOLUTION_OPTIONS} onChange={setResolution} />
+                            <SwitchRow
+                                items={spec.checks.map((item) => ({
+                                    key: item.key,
+                                    label: item.label,
+                                    detail: item.detail,
+                                    checked: item.key === "keepMusic" ? keepMusic : talkingHead,
+                                    onChange: (checked: boolean) => {
+                                        if (item.key === "keepMusic") setKeepMusic(checked);
+                                        else setTalkingHead(checked);
+                                    },
+                                }))}
+                            />
+                        </ComposerSection>
+
+                        <ComposerSection title="补充说明" hint="可选">
+                            <div className="wb-prompt">
                                 <textarea
+                                    className="wb-prompt-input"
                                     value={instructions}
                                     maxLength={spec.instructionMax}
                                     onChange={(event) => setInstructions(event.target.value)}
                                     placeholder={spec.instructionPlaceholder}
                                 />
-                                <span className="hp-inst-count">
-                                    {instructions.length}/{spec.instructionMax}
-                                </span>
+                                <div className="wb-prompt-meta">
+                                    <span>
+                                        {instructions.length} / {spec.instructionMax}
+                                    </span>
+                                    <span>描述越具体，替换越稳定</span>
+                                </div>
                             </div>
-                        </div>
+                        </ComposerSection>
                     </div>
 
-                    <div className="hp-submit">
-                        <button type="button" disabled={busy} onClick={() => void submit()}>
-                            {submitting ? <Loader2 className="animate-spin" aria-hidden style={{ width: 15, height: 15, verticalAlign: "-2px" }} /> : <Sparkles aria-hidden style={{ width: 15, height: 15, verticalAlign: "-2px" }} />} 开始生成
-                        </button>
-                    </div>
+                    <footer className="wb-footer">
+                        <div className="wb-estimate" aria-live="polite">
+                            <strong>{spec.label}</strong>
+                            <span>
+                                <LayoutGrid />
+                                {totalMaterials} 张素材 · {reference ? "参考视频已选" : "待选参考视频"}
+                                {selectedModel ? ` · ${selectedModel}` : ""}
+                            </span>
+                        </div>
+                        {disabledReason ? (
+                            <Tooltip title={disabledReason}>
+                                <span className="wb-submit-wrap">
+                                    <Button className="wb-submit" type="primary" size="large" disabled>
+                                        <ArrowUp />
+                                        <span>开始生成</span>
+                                    </Button>
+                                </span>
+                            </Tooltip>
+                        ) : (
+                            <Button className="wb-submit" type="primary" size="large" loading={busy} onClick={() => void submit()}>
+                                <ArrowUp />
+                                <span>开始生成</span>
+                            </Button>
+                        )}
+                    </footer>
 
                     <input
                         ref={slotFileRef}
@@ -816,9 +824,10 @@ export default function HypitWorkbenchPage() {
                         multiple
                         accept={IMAGE_ACCEPT}
                         onChange={(event) => {
+                            const slot = event.currentTarget.dataset.slot ?? spec.slots[0]?.slot ?? "person";
                             const files = Array.from(event.target.files ?? []);
                             event.target.value = "";
-                            void importFromLibrary(files);
+                            if (files.length) void uploadToSlot(slot, files);
                         }}
                     />
                     <input
@@ -834,78 +843,110 @@ export default function HypitWorkbenchPage() {
                     />
                 </aside>
 
-                <section className="hp-results" aria-label="复刻结果">
-                    <header className="hp-results-head">
-                        <div className="hp-results-title">
-                            视频结果
-                            <small>{tasks.length ? `${tasks.length} 个任务` : ""}</small>
+                <section className="wb-gallery" aria-label="复刻结果">
+                    <header className="wb-gallery-head">
+                        <div className="wb-gallery-title">
+                            <h2>结果</h2>
+                            <span>
+                                {tasks.length} 个任务
+                                {activeTask ? " · 1 个进行中" : ""}
+                            </span>
                         </div>
-                        <Button size="small" onClick={() => void refreshTasks()} loading={loadingTasks}>
-                            刷新
-                        </Button>
+                        <div className="wb-gallery-tools">
+                            <Tooltip title="刷新">
+                                <button type="button" className="wb-icon-button" data-icon-only aria-label="刷新结果" onClick={() => void refreshTasks()}>
+                                    <RefreshCw className={loadingTasks ? "animate-spin" : undefined} />
+                                </button>
+                            </Tooltip>
+                        </div>
                     </header>
-                    <div className="hp-results-body">
+                    <div className="wb-gallery-scroll">
                         {!nodeOnline ? (
-                            <div className="hp-node">
-                                <TriangleAlert aria-hidden />
-                                <span>执行节点尚未上线：任务会先排队保存，节点接入后自动开始复刻。现在可以正常提交任务。</span>
+                            <div className="wb-batch-notice">
+                                <CircleAlert aria-hidden />
+                                <span>执行节点尚未上线：任务会先排队保存，节点接入后自动开始复刻。</span>
+                            </div>
+                        ) : null}
+                        {loadError ? (
+                            <div className="wb-batch-notice">
+                                <CircleAlert aria-hidden />
+                                <span>{loadError}</span>
                             </div>
                         ) : null}
 
-                        {loadError ? <div className="hp-task-error">{loadError}</div> : null}
-
                         {tasks.length === 0 ? (
-                            <div className="hp-empty">
-                                <span className="hp-empty-icon">
-                                    <Clapperboard aria-hidden />
-                                </span>
-                                <h3>还没有复刻结果</h3>
-                                <p>左侧选一种替换类型，上传素材和参考视频，点「开始生成」后成片会出现在这里。</p>
+                            <div className="wb-empty">
+                                <WorkspaceState
+                                    compact
+                                    icon="assets"
+                                    title="还没有复刻结果"
+                                    description="左侧选好替换类型，上传素材和参考视频，点「开始生成」后成片会按任务保存在这里。"
+                                />
                             </div>
                         ) : (
-                            <div className="hp-tasks">
+                            <div className="wb-batch-list">
                                 {tasks.map((task) => (
-                                    <article key={task.id} className="hp-task">
-                                        <div className="hp-task-top">
-                                            <span className="hp-task-title">
-                                                <Clapperboard aria-hidden style={{ width: 14, height: 14 }} />
-                                                <span title={taskBrief(task)}>{taskBrief(task)}</span>
-                                            </span>
-                                            <span className={`hp-status is-${task.status}`}>{HYPIT_STATUS_LABELS[task.status]}</span>
-                                        </div>
-
-                                        {hypitTaskIsActive(task) ? (
-                                            <>
-                                                <div className="hp-progress" role="progressbar" aria-valuenow={task.progress} aria-valuemin={0} aria-valuemax={100}>
-                                                    <i style={{ width: `${Math.max(4, Math.min(100, task.progress))}%` }} />
-                                                </div>
-                                                <div className="hp-task-foot">
-                                                    <span>{task.stage || "等待执行节点"}</span>
+                                    <article key={task.id} className="wb-batch">
+                                        <header className="wb-batch-head">
+                                            <div className="wb-batch-meta">
+                                                {taskChips(task).map((chip) => (
+                                                    <span key={chip}>{chip}</span>
+                                                ))}
+                                            </div>
+                                            <div className="wb-batch-actions">
+                                                {hypitTaskIsActive(task) ? (
                                                     <Button size="small" type="text" onClick={() => void cancel(task)}>
                                                         取消
                                                     </Button>
-                                                </div>
-                                            </>
+                                                ) : null}
+                                                {task.status === "succeeded" && task.outputUrl ? (
+                                                    <a href={task.outputUrl} download target="_blank" rel="noreferrer">
+                                                        <Tooltip title="下载成片">
+                                                            <button type="button" className="wb-icon-button" data-icon-only aria-label="下载成片">
+                                                                <Download />
+                                                            </button>
+                                                        </Tooltip>
+                                                    </a>
+                                                ) : null}
+                                            </div>
+                                        </header>
+
+                                        {task.instructions ? <p className="wb-batch-prompt">{task.instructions}</p> : null}
+
+                                        {hypitTaskIsActive(task) ? (
+                                            <div>
+                                                <Progress percent={task.progress} size="small" showInfo={false} />
+                                                <p className="wb-muted-note">
+                                                    {HYPIT_STATUS_LABELS[task.status]} · {task.stage || "等待执行节点"} {task.progress}%
+                                                </p>
+                                            </div>
                                         ) : null}
 
                                         {task.status === "succeeded" && task.outputUrl ? (
-                                            <>
-                                                <video src={task.outputUrl} controls playsInline preload="metadata" />
-                                                <div className="hp-task-foot">
-                                                    <span>{new Date(task.finishedAt || task.createdAt).toLocaleString()}</span>
-                                                    <a href={task.outputUrl} download target="_blank" rel="noreferrer">
-                                                        <Button size="small">
-                                                            <Download aria-hidden style={{ width: 14, height: 14 }} />
-                                                            下载
-                                                        </Button>
-                                                    </a>
+                                            <div className="wb-tiles" style={{ ["--wb-tile-ratio" as string]: "9 / 16", ["--wb-tile-min" as string]: "180px" }}>
+                                                <div className="wb-tile is-output">
+                                                    <video className="hypit-tile-video" src={task.outputUrl} controls playsInline preload="metadata" />
                                                 </div>
-                                            </>
+                                            </div>
                                         ) : null}
 
-                                        {task.status === "failed" ? <div className="hp-task-error">{task.error || "复刻失败，请调整素材或描述后重试"}</div> : null}
+                                        {task.status === "failed" ? (
+                                            <div className="wb-batch-notice">
+                                                <CircleAlert aria-hidden />
+                                                <span>{task.error || "复刻失败，请调整素材或描述后重试"}</span>
+                                            </div>
+                                        ) : null}
 
-                                        {task.status === "succeeded" && !task.outputUrl ? <div className="hp-task-error">任务已完成，但产物链接缺失，请稍后刷新。</div> : null}
+                                        {task.status === "succeeded" && !task.outputUrl ? (
+                                            <div className="wb-batch-notice">
+                                                <CircleAlert aria-hidden />
+                                                <span>任务已完成，但产物链接缺失，请稍后刷新。</span>
+                                            </div>
+                                        ) : null}
+
+                                        <div className="wb-batch-tags">
+                                            <span className="wb-batch-status">{new Date(task.finishedAt || task.createdAt).toLocaleString()}</span>
+                                        </div>
                                     </article>
                                 ))}
                             </div>
