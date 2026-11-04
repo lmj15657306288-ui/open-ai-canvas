@@ -1,7 +1,7 @@
 import { http } from "@/services/api/request";
 
 /**
- * Hypit 视频复刻任务。
+ * Hypit 复刻视频任务。
  *
  * 执行侧是独立的 Hypit Worker（node22 + ffmpeg + headless chromium + agent CLI），
  * 画布只负责任务的创建、排队、展示与产物回链，不在后端进程内跑渲染。

@@ -1,6 +1,7 @@
 import { App, Button, Input, Progress } from "antd";
-import { ArrowUp, Check, CircleAlert, Clapperboard, Download, FolderOpen, ImagePlus, LayoutGrid, Music, RefreshCw, RotateCcw, Upload, X, XCircle } from "lucide-react";
+import { ArrowUp, Check, CircleAlert, Clapperboard, Download, Film, FolderOpen, Image as ImageIcon, ImagePlus, LayoutGrid, Music, RefreshCw, RotateCcw, Upload, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { WorkspaceState } from "@/components/layout/workspace-state";
@@ -23,6 +24,7 @@ import {
 } from "@/services/api/hypit";
 import { uploadResourceFile } from "@/services/api/resources";
 import { selectableModelsByCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 
 // 复用画布工作台的样式体系，保证与 /toolbox/image、/toolbox/video 完全同源。
 import "@/pages/workbench/workbench.css";
@@ -314,6 +316,8 @@ function MaterialSlot({
 
 export default function HypitWorkbenchPage() {
     const { message } = App.useApp();
+    const navigate = useNavigate();
+    const features = useUserStore((state) => state.features);
     const config = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const refFileRef = useRef<HTMLInputElement | null>(null);
@@ -596,9 +600,27 @@ export default function HypitWorkbenchPage() {
     return (
         <WorkspacePage fluid scroll={false} className="wb-page">
             <div className="wb-shell" data-kind="video">
-                <aside className="wb-composer" aria-label="视频复刻面板">
+                <aside className="wb-composer" aria-label="复刻视频面板">
                     <header className="wb-composer-head">
-                        <strong className="wb-composer-title">视频复刻</strong>
+                        <h1 className="sr-only">复刻视频</h1>
+                        <nav className="wb-kind-switch" aria-label="切换创作类型">
+                            {features.imageWorkbenchEnabled ? (
+                                <button type="button" aria-pressed={false} onClick={() => navigate("/toolbox/image")}>
+                                    <ImageIcon />
+                                    商品图片
+                                </button>
+                            ) : null}
+                            {features.videoWorkbenchEnabled ? (
+                                <button type="button" aria-pressed={false} onClick={() => navigate("/toolbox/video")}>
+                                    <Clapperboard />
+                                    商品视频
+                                </button>
+                            ) : null}
+                            <button type="button" aria-pressed aria-label="复刻视频" className="is-active">
+                                <Film />
+                                复刻视频
+                            </button>
+                        </nav>
                         <Tooltip title="清空素材、参考视频和参数（结果不受影响）">
                             <button type="button" className="wb-icon-button" data-icon-only aria-label="重置复刻面板" onClick={resetComposer}>
                                 <RotateCcw />

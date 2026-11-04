@@ -17,7 +17,7 @@ const featureNames: Record<FeatureKey, string> = {
     pluginCenterEnabled: "插件中心",
     imageWorkbenchEnabled: "生图",
     videoWorkbenchEnabled: "视频",
-    hypitWorkbenchEnabled: "视频复刻",
+    hypitWorkbenchEnabled: "复刻视频",
 };
 
 export function RequireFeature({ feature, children }: { feature: FeatureKey; children: ReactNode }) {
