@@ -605,15 +605,9 @@ export default function HypitWorkbenchPage() {
                         <h1 className="sr-only">复刻视频</h1>
                         <nav className="wb-kind-switch" aria-label="切换创作类型">
                             {features.imageWorkbenchEnabled ? (
-                                <button type="button" aria-pressed={false} onClick={() => navigate("/toolbox/image")}>
+                                <button type="button" aria-pressed={false} aria-label="商品图片" onClick={() => navigate("/toolbox/image")}>
                                     <ImageIcon />
                                     商品图片
-                                </button>
-                            ) : null}
-                            {features.videoWorkbenchEnabled ? (
-                                <button type="button" aria-pressed={false} onClick={() => navigate("/toolbox/video")}>
-                                    <Clapperboard />
-                                    商品视频
                                 </button>
                             ) : null}
                             <button type="button" aria-pressed aria-label="复刻视频" className="is-active">

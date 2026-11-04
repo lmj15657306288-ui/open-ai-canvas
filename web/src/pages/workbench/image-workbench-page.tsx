@@ -1439,18 +1439,13 @@ export function WorkbenchPage({ kind }: { kind: WorkbenchKind }) {
                 <aside className="wb-composer" aria-label={`${kindLabel}创作面板`} onPasteCapture={handlePaste}>
                     <header className="wb-composer-head">
                         <h1 className="sr-only">{kindLabel}生成</h1>
-                        {bothKinds || features.hypitWorkbenchEnabled ? (
+                        {kind === "image" && (features.imageWorkbenchEnabled || features.hypitWorkbenchEnabled) ? (
+                            // 工作台只保留两类：商品图片与复刻视频。视频生成仍从侧栏进入。
                             <nav className="wb-kind-switch" aria-label="切换创作类型">
                                 {features.imageWorkbenchEnabled ? (
-                                    <button type="button" aria-pressed={kind === "image"} className={kind === "image" ? "is-active" : ""} onClick={() => kind !== "image" && navigate("/toolbox/image")}>
+                                    <button type="button" aria-pressed aria-label="商品图片" className="is-active">
                                         <ImageIcon />
                                         商品图片
-                                    </button>
-                                ) : null}
-                                {features.videoWorkbenchEnabled ? (
-                                    <button type="button" aria-pressed={kind === "video"} className={kind === "video" ? "is-active" : ""} onClick={() => kind !== "video" && navigate("/toolbox/video")}>
-                                        <Clapperboard />
-                                        商品视频
                                     </button>
                                 ) : null}
                                 {features.hypitWorkbenchEnabled ? (
