@@ -10,7 +10,11 @@ import (
 
 func TestEcommerceAgentTaskRejectsStalePlanningModel(t *testing.T) {
 	t.Setenv("AI_MODE", "disabled")
-	svc, _, _, _ := creationTestService(t)
+	svc, _, _, _ := ecommerceCreationTestService(t)
+	project, err := svc.CreateEcommerceProject("user")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: ecommerceAgentSettingKey, ValueJSON: `{"logicalModelId":"admin-selected-model"}`}); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +24,7 @@ func TestEcommerceAgentTaskRejectsStalePlanningModel(t *testing.T) {
 	}
 	for _, stage := range []string{"planning", "product-understanding", "creative-directions"} {
 		_, err := svc.CreateTask("user", CreateTaskRequest{Type: "canvas_text", Prompt: "plan", LogicalModelID: "outdated-model", Input: map[string]any{
-			"mode": "text", "prompt": "plan", "metadata": map[string]any{"source": "ecommerce-agent", "stage": stage},
+			"mode": "text", "prompt": "plan", "metadata": map[string]any{"source": "ecommerce-agent", "stage": stage, "ecommerceProjectId": project.ID},
 		}})
 		if err == nil || !strings.Contains(err.Error(), "管理员更新") {
 			t.Fatalf("%s task accepted stale model: %v", stage, err)
@@ -88,7 +92,6 @@ func stageModelSetting() EcommerceOrchestrationSetting {
 		Vision:    EcommerceOrchestrationRole{Model: EcommerceOrchestrationModel{ChannelModelID: "vision-a"}, Fallback: EcommerceOrchestrationModel{ChannelModelID: "fallback-f"}},
 		Marketing: EcommerceOrchestrationRole{Model: EcommerceOrchestrationModel{ChannelModelID: "planner-b"}},
 		Director:  EcommerceOrchestrationRole{Reuse: "marketing"},
-		Quality:   EcommerceOrchestrationRole{Reuse: "vision"},
 	}
 }
 
@@ -96,6 +99,13 @@ func stageModelSetting() EcommerceOrchestrationSetting {
 // and each analysis stage is bound to its own model.
 func TestEcommerceStageSettingDrivesAgentModels(t *testing.T) {
 	svc, db, admin := stageModelFixture(t)
+	features := defaultFeatureAvailability()
+	features.EcommerceEnabled = true
+	saveAdmissionFeatures(t, svc, features)
+	project, err := svc.CreateEcommerceProject("user")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.UpdateEcommerceOrchestrationSetting(admin, stageModelSetting()); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +114,7 @@ func TestEcommerceStageSettingDrivesAgentModels(t *testing.T) {
 		t.Fatalf("resolved stage models = %#v, %v", setting, err)
 	}
 	task := func(stage, modelKey string) error {
-		_, err := svc.CreateTask("user", CreateTaskRequest{Type: "canvas_text", Prompt: "analyze", Input: map[string]any{"mode": "text", "prompt": "analyze", "config": map[string]any{"channelId": "stage-channel", "model": modelKey}, "metadata": map[string]any{"source": "ecommerce-agent", "stage": stage}}})
+		_, err := svc.CreateTask("user", CreateTaskRequest{Type: "canvas_text", Prompt: "analyze", Input: map[string]any{"mode": "text", "prompt": "analyze", "config": map[string]any{"channelId": "stage-channel", "model": modelKey}, "metadata": map[string]any{"source": "ecommerce-agent", "stage": stage, "ecommerceProjectId": project.ID}}})
 		return err
 	}
 	if err := task("creative-directions", "planner-b"); err == nil || !strings.Contains(err.Error(), "管理员更新") {
@@ -133,8 +143,7 @@ func TestEcommerceStageSettingRequiresAdminAndVisionModel(t *testing.T) {
 	}
 	missingVision := stageModelSetting()
 	missingVision.Vision = EcommerceOrchestrationRole{}
-	missingVision.Quality = EcommerceOrchestrationRole{}
-	if _, err := svc.UpdateEcommerceOrchestrationSetting(admin, missingVision); err == nil || !strings.Contains(err.Error(), "商品视觉理解主模型") {
+	if _, err := svc.UpdateEcommerceOrchestrationSetting(admin, missingVision); err == nil || !strings.Contains(err.Error(), "商品识别与视觉方向主模型") {
 		t.Fatalf("stage setting without a vision model saved: %v", err)
 	}
 	if _, saved, err := svc.storedEcommerceOrchestrationSetting(); err != nil || saved {

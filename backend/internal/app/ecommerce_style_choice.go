@@ -31,6 +31,9 @@ const ecommerceCustomStyleTimeout = 25 * time.Second
 // typed style is added to the recommendation as a new direction with its own
 // strategy, so planning reads it exactly like a recommended direction.
 func (s *Service) SelectEcommerceCreativeStyle(ctx context.Context, userID, recommendationID string, choice EcommerceStyleChoice) (*EcommerceCreativeDirectionSelection, error) {
+	if err := s.RequireFeature(FeatureEcommerce); err != nil {
+		return nil, err
+	}
 	choice.DirectionID, choice.Name, choice.Description = strings.TrimSpace(choice.DirectionID), strings.TrimSpace(choice.Name), strings.TrimSpace(choice.Description)
 	if utf8.RuneCountInString(choice.Name) > 40 || utf8.RuneCountInString(choice.Description) > 500 {
 		return nil, BadAuthRequest("风格名称最多 40 字，风格描述最多 500 字")
@@ -90,6 +93,7 @@ func (s *Service) SelectEcommerceCreativeStyle(ctx context.Context, userID, reco
 	mode, source := "creative", "custom"
 	switch {
 	case isPreset:
+		preset = ecommerceagent.AdaptStylePreset(preset, item.ProductCategory)
 		rec, mode, source = preset.Recommendation(), preset.Mode, "preset"
 		hint = &rec
 	case isCustom:

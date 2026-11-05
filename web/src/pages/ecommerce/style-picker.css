@@ -281,6 +281,7 @@
     content: "";
 }
 .commerce-style-card-art b {
+    font-family: var(--style-font);
     position: relative;
     z-index: 1;
     color: #fff;

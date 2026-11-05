@@ -10,6 +10,14 @@ import (
 	"yingce/backend/internal/model"
 )
 
+func (r *Repository) InsertEcommerceKnowledgeSources(sources []model.EcommerceKnowledgeSource) (int64, error) {
+	if len(sources) == 0 {
+		return 0, nil
+	}
+	result := r.db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(sources, 100)
+	return result.RowsAffected, result.Error
+}
+
 func (r *Repository) InsertEcommerceKnowledgeEntries(entries []model.EcommerceKnowledgeEntry) (int64, error) {
 	if len(entries) == 0 {
 		return 0, nil
@@ -40,6 +48,15 @@ func (r *Repository) EcommerceKnowledgeEntries() ([]model.EcommerceKnowledgeEntr
 	var entries []model.EcommerceKnowledgeEntry
 	err := r.db.Where("review_status = ?", "approved").Find(&entries).Error
 	return entries, err
+}
+
+func (r *Repository) EcommerceKnowledgeByIDs(ids []string) ([]model.EcommerceKnowledgeEntry, error) {
+	var result []model.EcommerceKnowledgeEntry
+	if len(ids) == 0 {
+		return result, nil
+	}
+	err := r.db.Where("id IN ? AND review_status = ? AND (valid_until IS NULL OR valid_until > ?)", ids, "approved", time.Now().UTC()).Find(&result).Error
+	return result, err
 }
 
 func (r *Repository) SearchEcommerceKnowledgeEntries(category, query string) ([]model.EcommerceKnowledgeEntry, error) {

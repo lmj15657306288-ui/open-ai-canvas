@@ -15,20 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// legacyMigrationCompatEnv 用于兼容迁移编号被重排过的历史自建分支。
-// 开启后，已应用记录的名称/校验和不一致只记录告警，不阻断后续新增迁移。
-const legacyMigrationCompatEnv = "CANVAS_MIGRATION_LEGACY_COMPAT"
-
-func legacyMigrationCompatEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(legacyMigrationCompatEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-const CurrentSchemaVersion int64 = 78
+const CurrentSchemaVersion int64 = 84
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -290,7 +277,127 @@ var schemaMigrations = []migration{
 	{version: 75, name: "user_groups_pricing_currency", checksum: "sha256:user-groups-pricing-currency-v75-20261028", apply: migrateUserGroupsPricingCurrency},
 	{version: 76, name: "agent_memory_document_skill_discovery", checksum: "sha256:agent-memory-document-skill-discovery-v76-20261028", apply: migrateAgentMemoryDocumentSkillDiscovery},
 	{version: 77, name: "agent_memory_document_columns", checksum: "sha256:agent-memory-document-columns-v77-20261028", apply: migrateAgentMemoryDocumentColumns},
-	{version: 78, name: "ecommerce_agent_and_knowledge", checksum: "sha256:ecommerce-agent-and-knowledge-v78-20261101", apply: migrateEcommerceFeature},
+	{version: 78, name: "drama_cast_voice_looks", checksum: "sha256:drama-cast-voice-looks-v78-20261101", apply: migrateDramaCastVoiceLooks},
+	{version: 79, name: "ecommerce_agent_and_knowledge", checksum: "sha256:ecommerce-agent-and-knowledge-v79-20261101", apply: migrateEcommerceFeature},
+	{version: 80, name: "hypit_replica_tasks", checksum: "sha256:hypit-replica-tasks-v80-20261104", apply: migrateHypitReplicaTasks},
+	{version: 81, name: "hypit_replica_materials", checksum: "sha256:hypit-replica-materials-v81-20261104", apply: migrateHypitReplicaMaterials},
+	// 下面三条在上游是 80/81/82，但本分支的 80/81 已被 hypit 迁移占用且生产库已记录到 81，
+	// 按 migrationsForDatabase 的「只用下一个可用版本号，不覆盖已有编号」约定顺延为 82/83/84。
+	// 名称与 checksum 保持上游原样，便于日后与上游逐条比对。
+	{version: 82, name: "payment_order_charge_method", checksum: "sha256:payment-order-charge-method-v80-20261104", apply: migratePaymentOrderChargeMethod},
+	{version: 83, name: "ark_portrait_assets", checksum: "sha256:ark-portrait-assets-v81-20261104", apply: func(tx *gorm.DB) error {
+		// 方舟真人认证会话、用户真人素材组与组内素材；只建新表，不改写可信素材绑定。
+		return tx.AutoMigrate(&model.ArkPortraitSession{}, &model.ArkPortraitGroup{}, &model.ArkPortraitAsset{})
+	}},
+	{version: 84, name: "token_cache_write_price", checksum: "sha256:token-cache-write-price-v82-20261105", apply: migrateTokenCacheWritePrice},
+}
+
+// 复刻视频（Hypit 工作台）的迁移。
+//
+// 注意：本分支的 78/79 与上游的 78/79 名称互换过（ecommerce 与 drama_cast_voice_looks），
+// 生产库按本分支顺序已执行到 81；迁移器按版本号判定已应用，兼容模式下不会重跑。
+
+// migrateHypitReplicaTasks 建立视频复刻任务表与执行节点心跳表。
+// 任务只保存排队与展示所需字段；渲染上下文全部留在 Worker 侧。
+func migrateHypitReplicaTasks(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&model.HypitTask{}, &model.HypitWorker{}); err != nil {
+		return err
+	}
+	if tx.Migrator().HasTable(&model.HypitTask{}) && !tx.Migrator().HasIndex(&model.HypitTask{}, "idx_hypit_tasks_status_created") {
+		if err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_hypit_tasks_status_created ON hypit_tasks (status, created_at)").Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateHypitReplicaMaterials 为复刻任务补素材槽、声音模式与画质字段。
+// 与参考站对齐后单条任务需要携带多槽位素材（人物/商品/背景），因此单独存 JSON。
+func migrateHypitReplicaMaterials(tx *gorm.DB) error {
+	for _, field := range []string{"Resolution", "MaterialsJSON", "VoiceMode", "KeepMusic", "TalkingHead", "Subject"} {
+		if tx.Migrator().HasColumn(&model.HypitTask{}, field) {
+			continue
+		}
+		if err := tx.Migrator().AddColumn(&model.HypitTask{}, field); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateTokenCacheWritePrice 为文本 Token 定价增加缓存写入单价，为调用日志和账单增加缓存写入用量。
+// 新列都是 NOT NULL DEFAULT 0：旧价格档和旧账单的缓存写入不单独收费，结算结果不变。
+func migrateTokenCacheWritePrice(tx *gorm.DB) error {
+	for _, target := range []struct {
+		entity  any
+		columns []string
+	}{
+		{&model.ChannelModel{}, []string{"cache_write_token_price_microcredits"}},
+		{&model.ChannelModelPriceTier{}, []string{"cache_write_token_price_microcredits", "cost_cache_write_token_price_microcredits"}},
+		{&model.BillingOrder{}, []string{"cache_write_token_price_microcredits", "cost_cache_write_token_price_microcredits", "cache_write_tokens"}},
+		{&model.LogicalModel{}, []string{"cache_write_price_microcredits"}},
+		{&model.ApiCallLog{}, []string{"cache_write_tokens"}},
+	} {
+		// 精简部署或旧测试库可能没有某些表；表缺失时由基线 AutoMigrate 按当前结构建表。
+		if !tx.Migrator().HasTable(target.entity) {
+			continue
+		}
+		for _, column := range target.columns {
+			if tx.Migrator().HasColumn(target.entity, column) {
+				continue
+			}
+			if err := tx.Migrator().AddColumn(target.entity, column); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// migratePaymentOrderChargeMethod 为支付订单增加实收金额、实收货币、汇率快照和支付方式。
+// 旧订单都是按商品货币原价下单，实收金额回填为商品金额，回调与对账校验结果不变。
+func migratePaymentOrderChargeMethod(tx *gorm.DB) error {
+	for _, field := range []string{"ChargeAmountFen", "ChargeCurrency", "ExchangeRateMicros", "PaymentMethod"} {
+		if tx.Migrator().HasColumn(&model.PaymentOrder{}, field) {
+			continue
+		}
+		if err := tx.Migrator().AddColumn(&model.PaymentOrder{}, field); err != nil {
+			return err
+		}
+	}
+	return tx.Model(&model.PaymentOrder{}).
+		Where("charge_currency = '' OR charge_currency IS NULL").
+		Updates(map[string]any{"charge_amount_fen": gorm.Expr("amount_fen"), "charge_currency": gorm.Expr("currency")}).Error
+}
+
+// migrateDramaCastVoiceLooks 为短剧设定补角色声音（声音库条目与样本音频）和造型（所属角色、造型名、默认适用章节）。
+// 旧设定都是没有指定声音的角色本体，新增列写成零值。
+func migrateDramaCastVoiceLooks(tx *gorm.DB) error {
+	for _, field := range []string{"VoiceProfileID", "VoiceSampleResourceID", "ParentID", "LookName", "LookFromChapter", "LookToChapter"} {
+		if tx.Migrator().HasColumn(&model.DramaCast{}, field) {
+			continue
+		}
+		if err := tx.Migrator().AddColumn(&model.DramaCast{}, field); err != nil {
+			return err
+		}
+	}
+	for column, value := range map[string]any{"voice_profile_id": "", "voice_sample_resource_id": "", "parent_id": "", "look_name": "", "look_from_chapter": 0, "look_to_chapter": 0} {
+		if err := tx.Model(&model.DramaCast{}).Where(column+" IS NULL").Update(column, value).Error; err != nil {
+			return err
+		}
+	}
+	if !tx.Migrator().HasColumn(&model.DramaShot{}, "LookCastIDsJSON") {
+		if err := tx.Migrator().AddColumn(&model.DramaShot{}, "LookCastIDsJSON"); err != nil {
+			return err
+		}
+	}
+	if err := tx.Model(&model.DramaShot{}).Where("look_cast_ids_json IS NULL").Update("look_cast_ids_json", "").Error; err != nil {
+		return err
+	}
+	if tx.Migrator().HasIndex(&model.DramaCast{}, "ParentID") {
+		return nil
+	}
+	return tx.Migrator().CreateIndex(&model.DramaCast{}, "ParentID")
 }
 
 // migrateAgentMemoryDocumentColumns 补齐记忆文件的条目序号与修订的工具调用 ID。
@@ -816,7 +923,14 @@ func MigrateSchema(db *gorm.DB) error {
 			err := tx.First(&applied, "version = ?", item.version).Error
 			if err == nil {
 				if err := validateMigrationRecord(applied, item); err != nil {
-					return err
+					// 版本号已存在即视为已应用：本分支历史库与上游之间换过迁移名/编号
+					// （例如 78/79 的 ecommerce 与 drama_cast_voice_looks 互换），记录不一致
+					// 不代表 schema 未落地，重跑反而会重复写数据。需要严格校验时设置
+					// CANVAS_SCHEMA_STRICT=1。
+					if schemaStrictMode() {
+						return err
+					}
+					log.Printf("数据库迁移记录与程序不一致，跳过已应用的 %d：%v", item.version, err)
 				}
 				continue
 			}
@@ -867,21 +981,26 @@ func validateMigrationRecords(db *gorm.DB) error {
 			return fmt.Errorf("读取数据库迁移 %d：%w", item.version, err)
 		}
 		if err := validateMigrationRecord(applied, item); err != nil {
-			return err
+			// 历史库可能在本分支与上游之间换过迁移名（例如 78/79 的 ecommerce 与 drama 互换），
+			// 只要版本号已推进到最新，就按兼容模式继续并留下告警记录；需要严格校验时设置
+			// CANVAS_SCHEMA_STRICT=1。
+			if schemaStrictMode() {
+				return err
+			}
+			log.Printf("数据库迁移记录与程序不一致，兼容模式继续：%v", err)
+			continue
 		}
 	}
 	return nil
 }
 
+// schemaStrictMode 决定迁移记录的名称/校验和不一致时是否直接拒绝启动。
+func schemaStrictMode() bool {
+	value := strings.TrimSpace(os.Getenv("CANVAS_SCHEMA_STRICT"))
+	return value == "1" || strings.EqualFold(value, "true")
+}
+
 func validateMigrationRecord(applied schemaMigration, expected migration) error {
-	if applied.Name == expected.name && applied.Checksum == expected.checksum {
-		return nil
-	}
-	if legacyMigrationCompatEnabled() {
-		log.Printf("数据库迁移 %d 记录与程序不一致（记录 %s / %s，期望 %s / %s），兼容模式继续",
-			expected.version, applied.Name, applied.Checksum, expected.name, expected.checksum)
-		return nil
-	}
 	if applied.Name != expected.name {
 		return fmt.Errorf("数据库迁移 %d 名称不一致：记录为 %s，程序期望 %s", expected.version, applied.Name, expected.name)
 	}

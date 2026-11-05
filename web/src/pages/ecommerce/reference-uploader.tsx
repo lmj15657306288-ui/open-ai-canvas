@@ -1,11 +1,11 @@
 import { Plus, X } from "lucide-react";
 import { Popover, Select } from "antd";
 import { useRef, useState } from "react";
-import { resourceStorageKey } from "@/services/api/resources";
+import { resourceFileUrl, resourceStorageKey } from "@/services/api/resources";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import type { EcommerceReference, EcommerceReferenceRole } from "@/services/api/ecommerce";
 import { CommerceHint } from "./commerce-hint";
-import { COMMERCE_IMAGE_ACCEPT, mightContainCommerceImage, readCommerceImageTransfer, type CommerceImageTransfer } from "./image-transfer";
+import { COMMERCE_IMAGE_ACCEPT, mightContainCommerceImage, readCommerceImageTransfer, writeCommerceImageTransfer, type CommerceImageTransfer } from "./image-transfer";
 import "./reference-uploader.css";
 
 export const referenceRoleOptions = [
@@ -75,6 +75,8 @@ export function ReferenceUploader({
                 alt={ref.name || "商品参考图"}
                 loading="lazy"
                 decoding="async"
+                draggable
+                onDragStart={(event) => writeCommerceImageTransfer(event.dataTransfer, { resourceId: ref.resourceId, name: ref.name || "商品参考图", url: resourceFileUrl(ref.resourceId) })}
                 fallback={<span className="commerce-reference-item-image-fallback" aria-label="图片暂不可用" />}
                 loadingFallback={<span className="commerce-reference-item-image-fallback" aria-label="正在读取图片" />}
             />
@@ -125,7 +127,7 @@ export function ReferenceUploader({
         <CommerceHint text="上传本地商品主图或细节图，支持一次添加多张，也可直接拖入或粘贴。">
             <label className={`commerce-reference-add ${busy ? "is-uploading" : ""}`}>
                 {busy ? <span className="commerce-reference-spinner" aria-hidden="true" /> : <Plus size={25} strokeWidth={1.5} aria-hidden="true" />}
-                <span>{busy ? "上传中…" : full ? "参考图已满" : dragging ? "松开添加图片" : references.length ? "继续添加" : compact ? "产品图" : "上传或拖入商品图"}</span>
+                <span>{busy ? "上传中…" : full ? "参考图已满" : dragging ? "松开添加" : references.length ? "继续添加" : compact ? "商品图" : "上传或拖入商品图"}</span>
                 <input
                     type="file"
                     aria-label="添加商品参考图"
@@ -181,8 +183,13 @@ export function ReferenceUploader({
                 void run(() => onTransfer(source), source.files);
             }}
         >
-            <strong>自己的商品图</strong>
-            <p className="commerce-reference-help">上传你的商品主图、细节、包装或 Logo，可一次添加多张。需要借鉴的风格与排版图片请放在下方。</p>
+            {/* 紧凑模式由外层区块提供标题与说明，这里不再重复。 */}
+            {compact ? null : (
+                <>
+                    <strong>自己的商品图</strong>
+                    <p className="commerce-reference-help">上传你的商品主图、细节、包装或 Logo，可一次添加多张。需要借鉴的风格与排版图片请放在下方。</p>
+                </>
+            )}
             <div className="commerce-reference-list" aria-label="商品参考图片">
                 {compact ? addTile : null}
                 {tiles}
@@ -194,7 +201,7 @@ export function ReferenceUploader({
                 ))}
                 {!compact ? addTile : null}
             </div>
-            <p id="commerce-reference-help" className="commerce-reference-help">
+            <p id="commerce-reference-help" className={compact ? "sr-only" : "commerce-reference-help"}>
                 可拖入微信、电脑、网页图片，或把右侧生成图拖到这里。点击此区域后按 Ctrl+V 粘贴图片。
             </p>
             {busy ? (

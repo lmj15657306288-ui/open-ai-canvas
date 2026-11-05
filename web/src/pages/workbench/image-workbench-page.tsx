@@ -1,5 +1,5 @@
 import { App, Button } from "antd";
-import { Clapperboard, Image as ImageIcon, RotateCcw } from "lucide-react";
+import { Clapperboard, Film, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -12,6 +12,7 @@ import { AntTooltip as Tooltip } from "@/components/ui/base/tooltip/ant-tooltip"
 import { AppModal } from "@/components/ui/product/app-modal/app-modal";
 import { normalizeCanvasNodeMentionTokens, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { createClientUUID } from "@/lib/client-id";
+import { togglePromptPhrase } from "@/lib/prompt-phrases";
 import { imageQualityLabel } from "@/lib/image-quality";
 import { imageResolutionUsesQuality } from "@/lib/image-size-presets";
 import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue } from "@/lib/model-capabilities";
@@ -43,7 +44,7 @@ import {
 import { ChoiceChips, ComposerFooter, ComposerSection, CountStepper, PromptSection, ReferenceSection, SceneSection, SwitchRow, videoRatioOptions, type WorkbenchReference } from "./workbench-composer";
 import { WorkbenchGallery, type GalleryActions, type GalleryBatch, type GalleryFilter, type GalleryTile } from "./workbench-gallery";
 import { missingWorkbenchInput, workbenchPromptRequired, workbenchVideoOperation } from "./workbench-input";
-import { isModelIdLike, togglePromptPhrase, WORKBENCH_INSPIRATIONS, WORKBENCH_SPEC_TIPS, workbenchQuickTools, workbenchRatioUsage } from "./workbench-presets";
+import { isModelIdLike, WORKBENCH_INSPIRATIONS, WORKBENCH_SPEC_TIPS, workbenchQuickTools, workbenchRatioUsage } from "./workbench-presets";
 import { SceneLibraryModal } from "./workbench-scene-library";
 import { WorkbenchViewer } from "./workbench-viewer";
 import "./workbench.css";
@@ -1352,7 +1353,6 @@ export function WorkbenchPage({ kind }: { kind: WorkbenchKind }) {
               : Array.from({ length: Math.floor(((videoProfile.duration.max || 15) - (videoProfile.duration.min || 1)) / (videoProfile.duration.step || 1)) + 1 }, (_, index) => (videoProfile.duration.min || 1) + index * (videoProfile.duration.step || 1))
           ).map((value) => ({ value: String(value), label: `${value} 秒` }))
         : [];
-    const bothKinds = features.imageWorkbenchEnabled && features.videoWorkbenchEnabled;
     const galleryCount = galleryBatches.reduce((sum, batch) => sum + batch.outputs.length, 0);
 
     const specControls =
@@ -1438,15 +1438,16 @@ export function WorkbenchPage({ kind }: { kind: WorkbenchKind }) {
                 <aside className="wb-composer" aria-label={`${kindLabel}创作面板`} onPasteCapture={handlePaste}>
                     <header className="wb-composer-head">
                         <h1 className="sr-only">{kindLabel}生成</h1>
-                        {bothKinds ? (
-                            <nav className="wb-kind-switch" aria-label="切换生成类型">
-                                <button type="button" aria-pressed={kind === "image"} className={kind === "image" ? "is-active" : ""} onClick={() => kind !== "image" && navigate("/toolbox/image")}>
-                                    <ImageIcon />
-                                    商品图片
-                                </button>
-                                <button type="button" aria-pressed={kind === "video"} className={kind === "video" ? "is-active" : ""} onClick={() => kind !== "video" && navigate("/toolbox/video")}>
+                        {kind === "video" && features.hypitWorkbenchEnabled ? (
+                            // 复刻视频属于视频生成：和商品视频并列在同一个类型切换里，不再出现在图片生成。
+                            <nav className="wb-kind-switch" aria-label="切换创作类型">
+                                <button type="button" aria-pressed aria-label="商品视频" className="is-active">
                                     <Clapperboard />
                                     商品视频
+                                </button>
+                                <button type="button" aria-pressed={false} aria-label="复刻视频" onClick={() => navigate("/toolbox/hypit")}>
+                                    <Film />
+                                    复刻视频
                                 </button>
                             </nav>
                         ) : (

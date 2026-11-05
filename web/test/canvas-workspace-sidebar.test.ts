@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { zhCN as canvasAZh } from "../src/i18n/messages/areas/canvasA/zh-CN";
+import { zhCN as canvasCZh } from "../src/i18n/messages/areas/canvasC/zh-CN";
 import { readFileSync } from "node:fs";
 import { canvasDockStyle } from "../src/lib/canvas/canvas-aceternity-style";
 import { canvasThemes } from "../src/lib/canvas-theme";
@@ -43,14 +45,16 @@ test("image style and presets remain visible without the prompt template picker"
     expect(source).toContain("<CanvasNineGridPicker");
     expect(source).toContain('dense appearance="quiet"');
     expect(source).toContain('const showPromptTemplates = !simpleMode && mode !== "image"');
-    expect(source).toContain("{showPromptTemplates ? <CanvasPresetPicker");
+    expect(source).toMatch(/\{showPromptTemplates\s*\?\s*\(?\s*<CanvasPresetPicker/);
     expect(source).toContain("if (showPromptTemplates &&");
     expect(source).not.toContain('aria-label="生成工具"');
-    expect(component("canvas-choose-image-style-picker.tsx")).toContain('resolvedLabel || "风格"');
+    expect(component("canvas-choose-image-style-picker.tsx")).toContain('resolvedLabel || t("canvasA.toolPicker.style.short")');
+    expect(canvasAZh.toolPicker.style.short).toBe("风格");
 });
 
 test("history explicitly describes its bounded dataset", () => {
-    expect(component("canvas-workspace-history-panel.tsx")).toContain("最近 30 条（含 Agent）");
+    expect(component("canvas-workspace-history-panel.tsx")).toContain('t("canvasC.workspaceHistory.title")');
+    expect(canvasCZh.workspaceHistory.title).toContain("最近 30 条（含 Agent）");
 });
 
 test("cleared tool references do not fall back to the original generation prompt", () => {
@@ -93,7 +97,7 @@ test("editor rail and expanded panel share one restrained glass surface without 
     const page = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
     const panel = component("canvas-workspace-panel.tsx");
     const styles = component("canvas-workspace-panel.css");
-    expect(page).toContain('<CanvasViewport');
+    expect(page).toContain("<CanvasViewport");
     expect(page).not.toContain("canvas-workspace-backdrop");
     expect(page).toContain("canvas-main-with-workspace");
     expect(styles).toContain(".canvas-main-with-workspace .canvas-editor-shell {\n    z-index: 0;");

@@ -87,15 +87,16 @@ type PublicChannelModel struct {
 
 // PublicChannelModelPriceTier 公开的渠道模型价格档（脱敏）
 type PublicChannelModelPriceTier struct {
-	ID                           string            `json:"id"`
-	Selector                     map[string]string `json:"selector,omitempty"`
-	Resolution                   string            `json:"resolution"`
-	VideoSeconds                 int               `json:"videoSeconds"`
-	BillingMode                  string            `json:"billingMode"`
-	UnitPriceMicrocredits        int64             `json:"unitPriceMicrocredits"`
-	InputTokenPriceMicrocredits  int64             `json:"inputTokenPriceMicrocredits"`
-	OutputTokenPriceMicrocredits int64             `json:"outputTokenPriceMicrocredits"`
-	CachedTokenPriceMicrocredits int64             `json:"cachedTokenPriceMicrocredits"`
+	ID                               string            `json:"id"`
+	Selector                         map[string]string `json:"selector,omitempty"`
+	Resolution                       string            `json:"resolution"`
+	VideoSeconds                     int               `json:"videoSeconds"`
+	BillingMode                      string            `json:"billingMode"`
+	UnitPriceMicrocredits            int64             `json:"unitPriceMicrocredits"`
+	InputTokenPriceMicrocredits      int64             `json:"inputTokenPriceMicrocredits"`
+	OutputTokenPriceMicrocredits     int64             `json:"outputTokenPriceMicrocredits"`
+	CachedTokenPriceMicrocredits     int64             `json:"cachedTokenPriceMicrocredits"`
+	CacheWriteTokenPriceMicrocredits int64             `json:"cacheWriteTokenPriceMicrocredits"`
 }
 
 // ModelCatalog 的创作端目录始终来自系统渠道模型，不反查逻辑模型或路由。
@@ -125,6 +126,10 @@ func (s *Service) ModelCatalog(access *userGroupAccess, intent *ModelRequestInte
 func (s *Service) publicSystemChannelCatalog(access *userGroupAccess, intent *ModelRequestIntent) ([]PublicChannelCatalog, error) {
 	if access == nil {
 		return nil, Unauthorized("请先登录")
+	}
+	policy, err := s.creditPolicy()
+	if err != nil {
+		return nil, err
 	}
 	channels, err := s.repo.SystemChannels(true)
 	if err != nil {
@@ -165,7 +170,7 @@ func (s *Service) publicSystemChannelCatalog(access *userGroupAccess, intent *Mo
 
 			publicModel, sanitizeErr := s.sanitizeChannelModel(&cm)
 			if sanitizeErr == nil {
-				sanitizeErr = s.applyGroupCatalogPricing(access, &cm, &publicModel)
+				sanitizeErr = s.applyGroupCatalogPricing(policy, access, &cm, &publicModel)
 			}
 			if sanitizeErr != nil {
 				if logging.Every("catalog-omit:"+cm.ID, 10*time.Minute) {
@@ -216,15 +221,16 @@ func (s *Service) sanitizeChannelModel(cm *model.ChannelModel) (PublicChannelMod
 			}
 		}
 		publicTiers = append(publicTiers, PublicChannelModelPriceTier{
-			ID:                           tier.ID,
-			Selector:                     model.DecodeSKUSelector(tier.SelectorJSON),
-			Resolution:                   tier.Resolution,
-			VideoSeconds:                 tier.VideoSeconds,
-			BillingMode:                  tier.BillingMode,
-			UnitPriceMicrocredits:        tier.UnitPriceMicrocredits,
-			InputTokenPriceMicrocredits:  tier.InputTokenPriceMicrocredits,
-			OutputTokenPriceMicrocredits: tier.OutputTokenPriceMicrocredits,
-			CachedTokenPriceMicrocredits: tier.CachedTokenPriceMicrocredits,
+			ID:                               tier.ID,
+			Selector:                         model.DecodeSKUSelector(tier.SelectorJSON),
+			Resolution:                       tier.Resolution,
+			VideoSeconds:                     tier.VideoSeconds,
+			BillingMode:                      tier.BillingMode,
+			UnitPriceMicrocredits:            tier.UnitPriceMicrocredits,
+			InputTokenPriceMicrocredits:      tier.InputTokenPriceMicrocredits,
+			OutputTokenPriceMicrocredits:     tier.OutputTokenPriceMicrocredits,
+			CachedTokenPriceMicrocredits:     tier.CachedTokenPriceMicrocredits,
+			CacheWriteTokenPriceMicrocredits: tier.CacheWriteTokenPriceMicrocredits,
 		})
 	}
 
@@ -273,12 +279,13 @@ func (s *Service) sanitizeChannelModel(cm *model.ChannelModel) (PublicChannelMod
 
 // applyGroupCatalogPricing 把公开价格档换算为当前分组实际扣费的微积分单价（含全局积分策略倍率），
 // 与 newBillingOrderWithPriceTier 使用同一换算函数。分组缺少该货币兑换比例时整模型不发布。
-func (s *Service) applyGroupCatalogPricing(access *userGroupAccess, cm *model.ChannelModel, publicModel *PublicChannelModel) error {
+func (s *Service) applyGroupCatalogPricing(policy CreditPolicy, access *userGroupAccess, cm *model.ChannelModel, publicModel *PublicChannelModel) error {
 	for index := range publicModel.PriceTiers {
 		tier := &publicModel.PriceTiers[index]
-		pricing, prices, err := s.groupTierPrices(access, cm, &model.ChannelModelPriceTier{
+		pricing, prices, err := groupTierPricesWithPolicy(policy, access, cm, &model.ChannelModelPriceTier{
 			UnitPriceMicrocredits: tier.UnitPriceMicrocredits, InputTokenPriceMicrocredits: tier.InputTokenPriceMicrocredits,
 			OutputTokenPriceMicrocredits: tier.OutputTokenPriceMicrocredits, CachedTokenPriceMicrocredits: tier.CachedTokenPriceMicrocredits,
+			CacheWriteTokenPriceMicrocredits: tier.CacheWriteTokenPriceMicrocredits,
 		}, cm.ModelKey)
 		if err != nil {
 			return err
@@ -287,6 +294,7 @@ func (s *Service) applyGroupCatalogPricing(access *userGroupAccess, cm *model.Ch
 		tier.InputTokenPriceMicrocredits = effectiveCatalogPrice(prices.Input, pricing.MultiplierBPS)
 		tier.OutputTokenPriceMicrocredits = effectiveCatalogPrice(prices.Output, pricing.MultiplierBPS)
 		tier.CachedTokenPriceMicrocredits = effectiveCatalogPrice(prices.Cached, pricing.MultiplierBPS)
+		tier.CacheWriteTokenPriceMicrocredits = effectiveCatalogPrice(prices.CacheWrite, pricing.MultiplierBPS)
 	}
 	publicModel.PricingMode, publicModel.DisplayPrice, publicModel.PriceLabel = computeChannelModelPriceDisplay(cm, publicModel.PriceTiers)
 	return nil

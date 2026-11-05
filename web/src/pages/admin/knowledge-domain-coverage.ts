@@ -9,6 +9,15 @@ export const commerceKnowledgeDomains = [
     { id: "KB08", label: "国内外平台规范" },
     { id: "KB09", label: "热点与创意趋势" },
     { id: "KB10", label: "真实还原与质量控制" },
+    { id: "KB11", label: "品类专属叙事" },
+    { id: "KB12", label: "字体与信息组件" },
+    { id: "KB13", label: "人物摄影真实性" },
+    { id: "KB14", label: "功能与规格表达" },
+    { id: "KB15", label: "可调用技能方法" },
+    { id: "KB16", label: "图像执行策略" },
+    { id: "KB17", label: "生成结果验收" },
+    { id: "KB18", label: "全行业分类字典" },
+    { id: "KB19", label: "行业与子品类路由" },
 ] as const;
 
 export function commerceKnowledgeDomainRows(coverage?: Record<string, number>) {

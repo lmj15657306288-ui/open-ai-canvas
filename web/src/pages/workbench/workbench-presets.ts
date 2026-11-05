@@ -63,27 +63,6 @@ export const WORKBENCH_INSPIRATIONS: Record<WorkbenchKind, InspirationGroup[]> =
     ],
 };
 
-const PROMPT_SEPARATORS = new Set(["，", ",", "、", "；", ";", " "]);
-
-export function promptHasPhrase(prompt: string, phrase: string) {
-    return Boolean(phrase) && prompt.includes(phrase);
-}
-
-/** 灵感短语开关：已包含则连同一个相邻分隔符移除，否则用中文逗号追加到末尾。 */
-export function togglePromptPhrase(prompt: string, phrase: string) {
-    const index = phrase ? prompt.indexOf(phrase) : -1;
-    if (index >= 0) {
-        let start = index;
-        let end = index + phrase.length;
-        if (start > 0 && PROMPT_SEPARATORS.has(prompt[start - 1])) start -= 1;
-        else if (end < prompt.length && PROMPT_SEPARATORS.has(prompt[end])) end += 1;
-        return `${prompt.slice(0, start)}${prompt.slice(end)}`.replace(/^[，,、；;\s]+/, "");
-    }
-    const trimmed = prompt.replace(/\s+$/, "");
-    if (!trimmed) return phrase;
-    return /[，,、；;。.!！?？\n]$/.test(trimmed) ? `${trimmed}${phrase}` : `${trimmed}，${phrase}`;
-}
-
 export type SceneFacet = { key: string; label: string; keywords: string[] };
 
 export const WORKBENCH_SCENE_FACETS: Record<WorkbenchKind, SceneFacet[]> = {
@@ -133,10 +112,19 @@ export function workbenchPageCategories(tools: WorkbenchTool[]) {
     return [...known, ...unknown].map((value) => ({ value, label: value === "recommended" ? "推荐" : workbenchCategoryLabel(value) }));
 }
 
+/**
+ * 不进「常用场景」快捷位的模板：改由专属工作台承载，避免同一个入口在列表里重复出现。
+ * 只影响 chip 快捷位，场景库（全部场景）里仍可正常选用。
+ */
+const HIDDEN_QUICK_TOOL_NAMES = new Set(["鞋履步态展示"]);
+
 /** 快捷场景：后台标为推荐的电商工具优先，其次电商与商品分类。 */
 export function workbenchQuickTools(tools: WorkbenchTool[], limit = 6) {
     const score = (tool: WorkbenchTool) => (tool.recommended ? 0 : 2) + (tool.categoryId === "ecommerce" || tool.categoryId === "product" ? 0 : 1);
-    return [...tools].sort((a, b) => score(a) - score(b) || (a.recommendationOrder ?? a.sortOrder) - (b.recommendationOrder ?? b.sortOrder)).slice(0, limit);
+    return tools
+        .filter((tool) => !HIDDEN_QUICK_TOOL_NAMES.has(tool.name.trim()))
+        .sort((a, b) => score(a) - score(b) || (a.recommendationOrder ?? a.sortOrder) - (b.recommendationOrder ?? b.sortOrder))
+        .slice(0, limit);
 }
 
 export type SceneTone = "product" | "people" | "scene" | "detail" | "marketing" | "video" | "creative";

@@ -11,6 +11,9 @@ const (
 )
 
 type (
+	HypitTaskCreateRequest                 = app.HypitTaskCreateRequest
+	HypitTaskPage                          = app.HypitTaskPage
+	HypitWorkerReportRequest               = app.HypitWorkerReportRequest
 	SaveEcommerceProjectRequest            = app.SaveEcommerceProjectRequest
 	EcommerceCreativeDirectionsRequest     = app.EcommerceCreativeDirectionsRequest
 	EcommerceStyleChoice                   = app.EcommerceStyleChoice

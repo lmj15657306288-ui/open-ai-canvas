@@ -12,7 +12,7 @@ import (
 )
 
 func TestEcommerceCreativeDirectionsAreDynamicAndStable(t *testing.T) {
-	svc, _, _, _ := creationTestService(t)
+	svc, _, _, _ := ecommerceCreationTestService(t)
 	now := time.Now().UTC()
 	source := model.EcommerceKnowledgeSource{ID: "test-source", Name: "Test vetted source", URL: "https://example.org/source", Repository: "test/source", Commit: "0123456789abcdef", License: "MIT", Status: "ready", LastSyncedAt: &now}
 	if err := svc.repo.UpsertEcommerceKnowledgeSource(&source); err != nil {
@@ -37,16 +37,16 @@ func TestEcommerceCreativeDirectionsAreDynamicAndStable(t *testing.T) {
 		t.Fatalf("want tech category, got %q", tech.ProductCategory)
 	}
 	if len(tech.Evidence) < 4 {
-		t.Fatalf("expected reviewed source plus three original visual methods, got %d", len(tech.Evidence))
+		t.Fatalf("expected reviewed knowledge and first-party design evidence, got %d", len(tech.Evidence))
 	}
 	visual := false
 	for _, evidence := range tech.Evidence {
-		if evidence.Title == "潮流穿搭、清新治愈与潮酷电音视觉体系" && evidence.TrustLevel == "first_party" {
+		if evidence.TrustLevel == "first_party" && (evidence.KnowledgeDomain == "KB03" || evidence.KnowledgeDomain == "KB09") {
 			visual = true
 		}
 	}
 	if !visual {
-		t.Fatal("original visual style knowledge missing from recommendation evidence")
+		t.Fatal("first-party design knowledge missing from recommendation evidence")
 	}
 	selected, err := svc.SelectEcommerceCreativeDirection("user", tech.RecommendationID, tech.Directions[1].ID)
 	if err != nil || selected.DirectionID != tech.Directions[1].ID || len(selected.PlanningContext) == 0 {
@@ -107,7 +107,7 @@ func TestEcommerceCreativeDirectionsAreDynamicAndStable(t *testing.T) {
 }
 
 func TestEcommerceCreativeDirectionsUseFirstPartyFallbackBeforeSourceSync(t *testing.T) {
-	svc, db, _, _ := creationTestService(t)
+	svc, db, _, _ := ecommerceCreationTestService(t)
 	project, err := svc.CreateEcommerceProject("user")
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func directionNamesFromSeeds(directions []ecommerceDirectionSeed) []string {
 }
 
 func TestEcommerceKnowledgeSearchFindsRelevantTaxonomyBeyondFirstPage(t *testing.T) {
-	svc, _, _, _ := creationTestService(t)
+	svc, _, _, _ := ecommerceCreationTestService(t)
 	entries := make([]model.EcommerceKnowledgeEntry, 0, 101)
 	for index := 0; index < 100; index++ {
 		entries = append(entries, model.EcommerceKnowledgeEntry{ID: fmt.Sprintf("taxonomy-%03d", index), SourceID: "taxonomy", KnowledgeType: "product_knowledge", Title: fmt.Sprintf("A category %03d", index), Category: "tech", ContentJSON: `{}`, ReviewStatus: "approved", DedupHash: fmt.Sprintf("taxonomy-hash-%03d", index)})
@@ -280,7 +280,7 @@ func TestEcommerceKnowledgeLiveSync(t *testing.T) {
 	if os.Getenv("RUN_ECOMMERCE_KNOWLEDGE_SYNC") != "1" {
 		t.Skip("explicit live read-only source sync")
 	}
-	svc, _, _, _ := creationTestService(t)
+	svc, _, _, _ := ecommerceCreationTestService(t)
 	actor := &model.User{ID: "admin", Role: model.UserRoleAdmin}
 	result, err := svc.SyncEcommerceKnowledge(context.Background(), actor)
 	if err != nil {

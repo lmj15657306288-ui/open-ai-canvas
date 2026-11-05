@@ -1,0 +1,266 @@
+{
+  "apiVersion": "yingce.plugin/v2",
+  "id": "magpie-gateway",
+  "name": "Magpie 网关（自建模型路由）",
+  "version": "1.0.0",
+  "author": "影策",
+  "description": "自建 Magpie 本地网关的 OpenAI Chat Completions 协议插件：按路由组（group/*）调用聚合后的订阅模型池。",
+  "documentation": "# Magpie 网关（自建模型路由）\n\n对接自建 [magpie](https://github.com/yetone/magpie) 本地网关的 OpenAI Chat Completions 协议。magpie 在本地聚合多家订阅账号并做路由与故障转移，画布把 magpie 当成一个普通 OpenAI 兼容上游使用。\n\n## 协议身份\n\n- 插件 ID：`magpie-gateway`\n- Provider ID：`magpie-chat`\n- 能力：`text`\n- 默认 Base URL：`http://100.117.92.76:3425`（渠道可覆盖）\n- 鉴权驱动：`bearer`（`Authorization: Bearer <网关 Key>`）\n- 创建：`POST /v1/chat/completions`\n- Agent：`POST /v1/chat/completions`\n- 生命周期：同步响应\n\n## 模型命名\n\n`model` 直接填 magpie 暴露的模型 ID。当前网关只暴露路由组：\n\n| 模型 ID | 含义 |\n| --- | --- |\n| `group/smart-split` | 意图路由：每轮请求自动分流到强模型或廉价模型 |\n| `group/strong-pool` | 强模型池，配额用尽自动故障转移到下一账号 |\n| `group/cheap-pool` | 廉价模型池 |\n\n`/v1/models` 默认只返回 chat 模型；`?kind=image,video` 可查图像/视频模型，`?kind=all` 返回全部。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | magpie「局域网共享」签发的网关 Key（`sk-magpie-key-...`） |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | magpie 模型 ID 或路由组。 |\n| `messages` | message[] | 是 | `provider message container` | 包含历史消息和当前用户输入。 |\n| `instructions` | string | 否 | `system/instructions` | 系统指令。 |\n| `temperature` | number | 否 | `temperature` | 采样温度。 |\n| `top_p` | number | 否 | `top_p` | 核采样参数。 |\n| `max_tokens` | integer | 否 | `max_tokens` | 最大输出 token。 |\n| `tools` | array | 否 | `tools` | 工具定义。 |\n| `tool_choice` | object\\|string | 否 | `tool_choice` | 工具选择策略。 |\n| `response_format` | object | 否 | `response_format` | 结构化输出配置。 |\n| `stream` | boolean | 否 | `stream` | 流式开关；后台任务以最终响应归一。 |\n\n## 上游请求模板逐字段清单\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n| `create.method` | `\"POST\"` |\n| `create.path` | `\"/chat/completions\"` |\n| `create.contentType` | `\"application/json\"` |\n| `create.body.model` | `{\"$ref\":\"request.model\"}` |\n| `create.body.messages` | `{\"$ref\":\"request.messages\"}` |\n| `create.body.temperature` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.temperature\"}}` |\n| `create.body.top_p` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.top_p\"}}` |\n| `create.body.max_tokens` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.max_tokens\"}}` |\n| `create.body.tools` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.tools\"}}` |\n| `create.body.tool_choice` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.tool_choice\"}}` |\n| `create.body.response_format` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.response_format\"}}` |\n| `create.body.stream` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.stream\"}}` |\n| `create.body.stop` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.stop\"}}` |\n| `create.body.seed` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.seed\"}}` |\n| `create.body.frequency_penalty` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.frequency_penalty\"}}` |\n| `create.body.presence_penalty` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.presence_penalty\"}}` |\n| `create.body.user` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.magpie-chat.user\"}}` |\n| `agent.method` | `\"POST\"` |\n| `agent.path` | `\"/chat/completions\"` |\n| `agent.contentType` | `\"application/json\"` |\n| `agent.body` | `{\"$merge\":[{\"$ref\":\"request.extra.agent.chatCompletion\"},{\"model\":{\"$ref\":\"request.model\"}}]}` |\n\n## Provider 扩展键\n\n- `providerOptions.magpie-chat.frequency_penalty`\n- `providerOptions.magpie-chat.max_tokens`\n- `providerOptions.magpie-chat.presence_penalty`\n- `providerOptions.magpie-chat.response_format`\n- `providerOptions.magpie-chat.seed`\n- `providerOptions.magpie-chat.stop`\n- `providerOptions.magpie-chat.stream`\n- `providerOptions.magpie-chat.temperature`\n- `providerOptions.magpie-chat.tool_choice`\n- `providerOptions.magpie-chat.tools`\n- `providerOptions.magpie-chat.top_p`\n- `providerOptions.magpie-chat.user`\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.status` | `\"succeeded\"` |\n| `response.textPaths[0]` | `\"choices.0.message.content\"` |\n| `response.textPaths[1]` | `\"choices.0.text\"` |\n| `response.reasoningPaths[0]` | `\"choices.0.message.reasoning_content\"` |\n| `response.usage` | `{\"$ref\":\"response.usage\"}` |\n| `response.errorPaths[0]` | `\"error.code\"` |\n| `response.messagePaths[0]` | `\"error.message\"` |\n| `agentResponse.textPaths[0]` | `\"choices.0.message.content\"` |\n| `agentResponse.textPaths[1]` | `\"choices.0.text\"` |\n| `agentResponse.reasoningPaths[0]` | `\"choices.0.message.reasoning_content\"` |\n| `agentResponse.toolCallsPath` | `\"choices.0.message.tool_calls\"` |\n| `agentResponse.toolCallIdPaths[0]` | `\"id\"` |\n| `agentResponse.toolCallNamePaths[0]` | `\"function.name\"` |\n| `agentResponse.toolCallArgumentsPaths[0]` | `\"function.arguments\"` |\n\n## 部署边界\n\n- magpie 网关运行在用户的 tailnet 设备（`100.117.92.76:3425`），画布云服务器必须能路由到该地址：云服务器需加入同一 tailnet，且该主机要加入 `CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS` 白名单（HTTP + 私网地址的强制要求）。\n- 网关 Key 在 magpie「Settings → Share on local network」中签发，可绑定每日/每周/每月限额；网关侧会按 Key 鉴权，无 Key 请求 401。\n- 该插件只代表 magpie 的 OpenAI Chat 线协议 profile；magpie 的 Anthropic Messages、Gemini、OpenAI Responses 端点如需接入必须另建独立插件。\n",
+  "permissions": [
+    "generation.run",
+    "media.read"
+  ],
+  "configuration": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "type": "secret",
+        "label": "网关 Key",
+        "placeholder": "sk-magpie-key-...",
+        "required": true
+      }
+    ]
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "magpie-chat",
+        "label": "Magpie 网关",
+        "capabilities": [
+          "text"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "user.custom-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "http://100.117.92.76:3425",
+        "requiresPublicMediaUrls": false,
+        "auth": {
+          "type": "bearer",
+          "field": "apiKey"
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "type": "string",
+            "required": true,
+            "mapping": "model",
+            "description": "上游模型 ID。"
+          },
+          {
+            "name": "messages",
+            "type": "message[]",
+            "required": true,
+            "mapping": "provider message container",
+            "description": "包含历史消息和当前用户输入。"
+          },
+          {
+            "name": "instructions",
+            "type": "string",
+            "required": false,
+            "mapping": "system/instructions",
+            "description": "系统指令。"
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "required": false,
+            "mapping": "temperature",
+            "description": "采样温度。"
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "required": false,
+            "mapping": "top_p",
+            "description": "核采样参数。"
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "required": false,
+            "mapping": "max_tokens/max_output_tokens",
+            "description": "最大输出 token。"
+          },
+          {
+            "name": "tools",
+            "type": "array",
+            "required": false,
+            "mapping": "tools/toolConfig",
+            "description": "工具定义。"
+          },
+          {
+            "name": "tool_choice",
+            "type": "object|string",
+            "required": false,
+            "mapping": "tool_choice",
+            "description": "工具选择策略。"
+          },
+          {
+            "name": "response_format",
+            "type": "object",
+            "required": false,
+            "mapping": "response_format/text",
+            "description": "结构化输出配置。"
+          },
+          {
+            "name": "stream",
+            "type": "boolean",
+            "required": false,
+            "mapping": "stream",
+            "description": "流式开关；后台任务当前以最终响应归一。"
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/chat/completions",
+          "contentType": "application/json",
+          "body": {
+            "model": {
+              "$ref": "request.model"
+            },
+            "messages": {
+              "$ref": "request.messages"
+            },
+            "temperature": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.temperature"
+              }
+            },
+            "top_p": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.top_p"
+              }
+            },
+            "max_tokens": {
+              "$omitEmpty": {
+                "$coalesce": [
+                  {
+                    "$ref": "request.extra.max_tokens"
+                  },
+                  {
+                    "$ref": "request.providerOptions.magpie-chat.max_tokens"
+                  }
+                ]
+              }
+            },
+            "tools": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.tools"
+              }
+            },
+            "tool_choice": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.tool_choice"
+              }
+            },
+            "response_format": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.response_format"
+              }
+            },
+            "stream": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.stream"
+              }
+            },
+            "stop": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.stop"
+              }
+            },
+            "seed": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.seed"
+              }
+            },
+            "frequency_penalty": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.frequency_penalty"
+              }
+            },
+            "presence_penalty": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.presence_penalty"
+              }
+            },
+            "logprobs": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.logprobs"
+              }
+            },
+            "top_logprobs": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.top_logprobs"
+              }
+            },
+            "user": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.magpie-chat.user"
+              }
+            }
+          }
+        },
+        "agent": {
+          "method": "POST",
+          "path": "/chat/completions",
+          "contentType": "application/json",
+          "body": {
+            "$merge": [
+              {
+                "$ref": "request.extra.agent.chatCompletion"
+              },
+              {
+                "model": {
+                  "$ref": "request.model"
+                }
+              }
+            ]
+          }
+        },
+        "response": {
+          "status": "succeeded",
+          "textPaths": [
+            "choices.0.message.content",
+            "choices.0.text"
+          ],
+          "reasoningPaths": [
+            "choices.0.message.reasoning_content"
+          ],
+          "usage": {
+            "$ref": "response.usage"
+          },
+          "errorPaths": [
+            "error.code"
+          ],
+          "messagePaths": [
+            "error.message"
+          ]
+        },
+        "agentResponse": {
+          "textPaths": [
+            "choices.0.message.content",
+            "choices.0.text"
+          ],
+          "reasoningPaths": [
+            "choices.0.message.reasoning_content"
+          ],
+          "toolCallsPath": "choices.0.message.tool_calls",
+          "toolCallIdPaths": [
+            "id"
+          ],
+          "toolCallNamePaths": [
+            "function.name"
+          ],
+          "toolCallArgumentsPaths": [
+            "function.arguments"
+          ]
+        },
+        "description": "自建 Magpie 网关的 OpenAI Chat Completions 协议；model 填 magpie 的模型 ID 或路由组（如 group/strong-pool）。"
+      }
+    ]
+  }
+}

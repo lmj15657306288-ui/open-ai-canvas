@@ -2,13 +2,15 @@ import { Button, Popover } from "antd";
 import { Check, Images, LoaderCircle, RotateCcw, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { parseBackendGenerationResult } from "@/services/api/generation-task";
-import { resolveResourceVariantUrl } from "@/services/api/resources";
+import { resolveResourceVariantUrl, resourceIdFromStorageKey } from "@/services/api/resources";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { EcommerceCreativeDirection, EcommerceDraft, EcommercePlan, EcommercePlanImage } from "@/services/api/ecommerce";
 import type { AiConfig } from "@/stores/use-config-store";
 import { imageTypes, labelOf } from "./catalog";
 import { SingleImageEditor } from "./result-gallery";
 import { commerceCopyHasDirections } from "./consumer-copy";
+import { commerceCanvasImages } from "./continuation";
+import { writeCommerceImageTransfer } from "./image-transfer";
 
 function imageSource(task?: GenerationTask) {
     if (!task || task.status !== "succeeded") return undefined;
@@ -48,7 +50,7 @@ export function EcommerceAgentFeed({
     const [editing, setEditing] = useState<string>();
     const [expanded, setExpanded] = useState<string>();
     const complete = plan?.images.filter((image) => image.taskId && imageSource(tasks[image.taskId])).length || 0;
-    const total = plan?.images.length || 0;
+    const total = commerceCanvasImages(plan).length;
     const submitted = plan?.images.some((image) => image.taskId);
     const active = submitted && plan?.images.some((image) => image.taskId && (!tasks[image.taskId] || !["succeeded", "failed", "cancelled"].includes(tasks[image.taskId].status)));
     return (
@@ -73,7 +75,7 @@ export function EcommerceAgentFeed({
                     </header>
                     <div className="commerce-generation-visual">
                         <span className="commerce-yoru-glow" />
-                        <img src="/yoru/yoru-body.png" alt="小夜正在创作" />
+                        <img src="/yoru/yoru-body.webp?v=20261101" alt="小夜正在创作" />
                         <span className="commerce-generation-particles" aria-hidden="true" />
                     </div>
                     <div className="commerce-generation-track" aria-label={`已完成 ${complete} 张，共 ${total} 张`}>
@@ -85,9 +87,15 @@ export function EcommerceAgentFeed({
                     </p>
                 </section>
             ) : null}
-            {plan?.images.map((image, index) => {
+            {commerceCanvasImages(plan).map((image, index) => {
                 const task = image.taskId ? tasks[image.taskId] : undefined;
                 const src = imageSource(task);
+                let resourceId = image.resourceId;
+                try {
+                    resourceId ||= task ? resourceIdFromStorageKey(parseBackendGenerationResult(task)?.images?.[0]?.storageKey) : undefined;
+                } catch {
+                    /* Legacy previews still provide their URL. */
+                }
                 if (!src && task && ["failed", "cancelled"].includes(task.status))
                     return (
                         <section className="commerce-generated-card" key={image.id} role="alert">
@@ -120,7 +128,7 @@ export function EcommerceAgentFeed({
                             <span> · {image.ratio}</span>
                         </p>
                         <button type="button" className="commerce-generated-preview" onClick={() => onFocus(image.id)} aria-label={`在画布中选择第 ${index + 1} 张图片`}>
-                            <img src={src} alt={`第 ${index + 1} 张商品图片`} />
+                            <img src={src} alt={`第 ${index + 1} 张商品图片`} draggable onDragStart={(event) => writeCommerceImageTransfer(event.dataTransfer, { resourceId, name: `第 ${index + 1} 张生成结果`, url: src })} />
                         </button>
                         <footer>
                             <Popover
@@ -129,7 +137,7 @@ export function EcommerceAgentFeed({
                                 trigger="click"
                                 placement="rightTop"
                                 destroyOnHidden
-                                content={<SingleImageEditor key={`${image.id}:${image.taskId}`} config={config} draft={draft} image={image} imageModels={imageModels} onClose={() => setEditing(undefined)} onGenerate={onRegenerate} />}
+                                content={<SingleImageEditor key={`${image.id}:${image.taskId}`} config={config} draft={image.sourceDraft || draft} image={image} imageModels={imageModels} onClose={() => setEditing(undefined)} onGenerate={onRegenerate} />}
                             >
                                 <Button size="small" icon={<RotateCcw size={14} />} onClick={() => setEditing(image.id)}>
                                     重新生成{imageCost == null ? "" : `（约 ${imageCost.toLocaleString("zh-CN", { maximumFractionDigits: 3 })} 积分）`}

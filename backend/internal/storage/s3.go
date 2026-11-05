@@ -3,7 +3,6 @@ package storage
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +19,18 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	awsv4 "github.com/aws/aws-sdk-go/aws/signer/v4"
 	awss3 "github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+)
+
+const (
+	// s3MultipartThreshold 以上的对象改走分片上传。
+	// 单次 PutObject 会把整个对象塞进一个 HTTP 请求体，在 Cloudflare 这类前置代理
+	// （默认请求体上限 100MiB）后面会被 413 直接拒绝，大视频因此永远写不进去。
+	s3MultipartThreshold = 32 << 20
+	// 每片 8MiB：远低于 100MiB 上限；片小一点在隧道上更容易并行摊平 RTT。
+	s3MultipartPartSize = 8 << 20
+	// 6 路并发：实测单流只有 ~0.5MB/s；6 路最优，12 路反而因链路拥塞回落到 0.6MB/s。
+	s3MultipartConcurrency = 6
 )
 
 func ValidateStorageEndpoint(raw string) (*url.URL, error) {
@@ -60,15 +71,22 @@ func NewS3Client(setting Settings, timeout time.Duration) (*awss3.S3, error) {
 		return nil, err
 	}
 	if setting.Region == "" || setting.Bucket == "" || setting.AccessKeyID == "" || setting.AccessKeySecret == "" {
-		return nil, errors.New("S3 Region、Bucket 或访问密钥不完整")
+		return nil, fmt.Errorf("%s Region、Bucket 或访问密钥不完整", s3ServiceName(setting))
+	}
+	forcePathStyle := setting.PathStyle || !StandardAWSS3Endpoint(endpoint.String())
+	sessionToken := setting.SessionToken
+	if setting.Provider == volcengineTOSProvider {
+		// TOS 的 S3 兼容域名按 virtual-hosted 访问 Bucket；平台只保存长期 AK/SK。
+		forcePathStyle = false
+		sessionToken = ""
 	}
 	httpClient := outbound.OutboundHTTPClient(timeout)
 	config := aws.NewConfig().
 		WithRegion(setting.Region).
 		WithEndpoint(endpoint.String()).
-		WithCredentials(credentials.NewStaticCredentials(setting.AccessKeyID, setting.AccessKeySecret, setting.SessionToken)).
+		WithCredentials(credentials.NewStaticCredentials(setting.AccessKeyID, setting.AccessKeySecret, sessionToken)).
 		WithHTTPClient(httpClient).
-		WithS3ForcePathStyle(setting.PathStyle || !StandardAWSS3Endpoint(endpoint.String())).
+		WithS3ForcePathStyle(forcePathStyle).
 		WithDisableSSL(endpoint.Scheme == "http")
 	sess, err := session.NewSession(config)
 	if err != nil {
@@ -87,6 +105,12 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 	if err != nil {
 		return "", err
 	}
+	key := strings.TrimLeft(objectKey, "/")
+	if size < 0 || size >= s3MultipartThreshold {
+		// 大对象不再整体缓冲，直接按片流式上传：既绕开代理请求体上限，
+		// 也避免把几百 MB 视频读进内存。
+		return putS3ObjectMultipart(ctx, client, setting, key, mimeType, size, body)
+	}
 	var seekable io.ReadSeeker
 	if reader, ok := body.(io.ReadSeeker); ok {
 		seekable = reader
@@ -100,11 +124,11 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 			return "", readErr
 		}
 		if size >= 0 && int64(len(data)) != size {
-			return "", errors.New("S3 上传内容长度与资源记录不一致")
+			return "", fmt.Errorf("%s 上传内容长度与资源记录不一致", s3ServiceName(setting))
 		}
 		seekable = bytes.NewReader(data)
 	}
-	input := &awss3.PutObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(strings.TrimLeft(objectKey, "/")), Body: seekable}
+	input := &awss3.PutObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key), Body: seekable}
 	if mimeType != "" {
 		input.ContentType = aws.String(mimeType)
 	}
@@ -113,9 +137,49 @@ func putS3Object(ctx context.Context, setting Settings, objectKey string, mimeTy
 	}
 	output, err := client.PutObjectWithContext(ctx, input)
 	if err != nil {
-		return "", fmt.Errorf("S3 上传失败：%w", err)
+		return "", fmt.Errorf("%s 上传失败：%w", s3ServiceName(setting), err)
 	}
 	return strings.Trim(aws.StringValue(output.ETag), `"`), nil
+}
+
+// putS3ObjectMultipart 用分片上传写入大对象。
+// 相较单次 PutObject：每个分片是独立 HTTP 请求（16MiB），不会被前置代理的
+// 请求体上限拦截；ETag 直接取自 CompleteMultipartUpload，大小校验尽力而为。
+func putS3ObjectMultipart(ctx context.Context, client *awss3.S3, setting Settings, key string, mimeType string, size int64, body io.Reader) (string, error) {
+	reader := body
+	if size >= 0 {
+		// 用最多 size 字节喂给分片器：既保证不会读到资源记录之外的内容，
+		// 也让分片器在正确位置收到 EOF。
+		reader = io.LimitReader(body, size)
+	}
+	uploader := s3manager.NewUploaderWithClient(client, func(u *s3manager.Uploader) {
+		u.PartSize = s3MultipartPartSize
+		u.Concurrency = s3MultipartConcurrency
+		u.LeavePartsOnError = false
+	})
+	input := &s3manager.UploadInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key), Body: reader}
+	if mimeType != "" {
+		input.ContentType = aws.String(mimeType)
+	}
+	output, err := uploader.UploadWithContext(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("S3 分片上传失败：%w", err)
+	}
+	// CompleteMultipartUpload 已经把 ETag 带回来了，不必为了取 ETag 再发一次 HEAD。
+	etag := strings.Trim(aws.StringValue(output.ETag), `"`)
+	if size >= 0 {
+		// 尽力校验落盘大小。部分 S3 兼容网关对 HEAD 的鉴权与 GET 不一致，
+		// 这种情况不应该让已经成功的上传变成失败。
+		if head, headErr := client.HeadObjectWithContext(ctx, &awss3.HeadObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(key)}); headErr == nil {
+			if got := aws.Int64Value(head.ContentLength); got != size {
+				return "", fmt.Errorf("S3 分片上传后大小不一致：期望 %d，实际 %d", size, got)
+			}
+			if etag == "" {
+				etag = strings.Trim(aws.StringValue(head.ETag), `"`)
+			}
+		}
+	}
+	return etag, nil
 }
 
 func GetS3ObjectRange(setting Settings, objectKey string, rangeHeader string) (*ObjectStream, error) {
@@ -133,7 +197,7 @@ func GetS3ObjectRange(setting Settings, objectKey string, rangeHeader string) (*
 		if requestFailure, ok := err.(awserr.RequestFailure); ok && requestFailure.StatusCode() == http.StatusRequestedRangeNotSatisfiable {
 			return &ObjectStream{Body: io.NopCloser(bytes.NewReader(nil)), StatusCode: http.StatusRequestedRangeNotSatisfiable, AcceptRanges: "bytes"}, nil
 		}
-		return nil, fmt.Errorf("S3 读取失败：%w", err)
+		return nil, fmt.Errorf("%s 读取失败：%w", s3ServiceName(setting), err)
 	}
 	status := http.StatusOK
 	if rangeHeader != "" && aws.StringValue(output.ContentRange) != "" {
@@ -153,7 +217,7 @@ func signedS3ObjectURL(setting Settings, objectKey string, signing objectURLSign
 		return "", err
 	}
 	if !signing.ExpiresAt.After(time.Now()) {
-		return "", errors.New("S3 签名有效期必须晚于当前时间")
+		return "", fmt.Errorf("%s 签名有效期必须晚于当前时间", s3ServiceName(setting))
 	}
 	input := &awss3.GetObjectInput{Bucket: aws.String(setting.Bucket), Key: aws.String(strings.TrimLeft(objectKey, "/"))}
 	if signing.CacheControl != "" {
@@ -171,7 +235,7 @@ func signedS3ObjectURL(setting Settings, objectKey string, signing objectURLSign
 	}})
 	value, err := req.Presign(signing.ExpiresAt.Sub(signedAt))
 	if err != nil {
-		return "", fmt.Errorf("S3 下载地址签名失败：%w", err)
+		return "", fmt.Errorf("%s 下载地址签名失败：%w", s3ServiceName(setting), err)
 	}
 	return value, nil
 }
@@ -187,7 +251,7 @@ func DeleteS3Object(setting Settings, objectKey string) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("删除 S3 对象失败：%w", err)
+		return fmt.Errorf("删除 %s 对象失败：%w", s3ServiceName(setting), err)
 	}
 	return nil
 }

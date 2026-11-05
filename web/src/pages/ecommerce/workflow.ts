@@ -1,5 +1,5 @@
 import { modelCapabilityConfigFor, normalizeImageValue, type ImageCapabilityConfig } from "@/lib/model-capabilities";
-import { modelQuoteRequest } from "@/lib/model-pricing";
+import { systemModelQuoteRequest } from "@/lib/model-pricing";
 import { createGenerationTask, queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { parseBackendGenerationResult, prepareBackendGenerationTask } from "@/services/api/generation-task";
 import { quoteModel } from "@/services/api/logical-models";
@@ -17,6 +17,7 @@ import { commerceLayoutReferences, commerceReferenceImageInstruction, normalizeR
 import { prepareCommerceReferencePlan, prepareCommerceReferenceViews } from "./long-reference-media";
 import { assertCommerceConsumerCopy, commerceTypographyInstruction } from "./consumer-copy";
 import { commercePlatformImageRule, commercePlatformListingMain } from "./platform-style";
+import { commerceRestrictedPhrase } from "./platform-knowledge";
 
 export function manuallyEditedCommerceImage(original: EcommercePlan["images"][number], edited: EcommercePlan["images"][number]) {
     if (original.prompt === edited.prompt) return edited;
@@ -39,6 +40,7 @@ const commerceRegenerationShifts = [
 ];
 const commerceRegenerationLayoutShift = "换版式：在本套 UI 套件内换一种信息组织方式（例如卡片改为编号列表、气泡改为角标或手写批注），文字块整体换到新的位置";
 const commerceRegenerationPersonShift = "换人物表现：同一位人物换姿态、视线与使用商品的动作，机位随之调整";
+const commerceRegenerationFaces = ["偏椭圆脸、自然平眉与柔和下颌", "偏方脸、较浓眉毛与清楚下颌转折", "略长脸、弧眉与清楚唇峰", "偏圆脸、柔和面颊与自然眉峰", "清楚颧骨、平缓唇线与自然眉毛", "宽额、略圆下颌与自然眉间距"];
 const commerceFixedRegenerationShifts = ["微调商品的摆放角度与朝向（在本类型允许的视角内），背景与尺度规范不变", "重新布光：调整主光柔和度与高光位置，让轮廓、材质和接触阴影更干净", "按同一规范重新拍摄：提升边缘清晰度与色彩准确度，去除上一版的瑕疵"];
 
 /**
@@ -51,6 +53,10 @@ export function commerceRegenerationVariation(draft: EcommerceDraft, image: Ecom
     const hasCopy = commerceAllowsText(draft, image.imageType) && Boolean((image.copy || "").trim());
     const pool = fixed ? commerceFixedRegenerationShifts : [...commerceRegenerationShifts, ...(hasCopy ? [commerceRegenerationLayoutShift] : []), ...(commerceImageUsesModel(draft, image) ? [commerceRegenerationPersonShift] : [])];
     const shift = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+    if (draft.count === 1 && commerceImageUsesModel(draft, image) && !draft.references.some((ref) => draft.modelEnabled && ref.role === "model")) {
+        const face = commerceRegenerationFaces[Math.min(commerceRegenerationFaces.length - 1, Math.floor(random() * commerceRegenerationFaces.length))];
+        return `【重新生成·换一版】单张自动选角重新选人：${shift}；在商品适用人群和目标市场内换一位人物，面貌方向为${face}，肤质真实、表情自然。此轮换人优先于旧分镜中的自动人物面貌；不复用上一版默认面孔，不只换衣服。保留本张已审阅文案、真实商品、所选风格与平台类型规则。明确指定人物身份时仍以用户要求为准。`;
+    }
     return `【重新生成·换一版】用户要求在同一方案下换一版，成品要与上一版明显不同：${shift}。保持不变：${hasCopy ? "本张文案逐字不变，" : ""}商品外观与事实、本套色板与字体、人物设定（同一人物）以及平台与类型硬性规则${fixed ? "（统一背景、尺度、视角与参考版式）" : ""}。`;
 }
 
@@ -73,20 +79,20 @@ export function commerceProductReshoot(imageType: string) {
 
 const commerceArtifactGuard = "避免 AI 痕迹：扭曲或乱码文字、变形 Logo、多余或融化的部件、错误的手指、重复图案、无来源的光斑粒子和漂浮杂物。没有内部结构资料时，不绘制写实爆炸图、剖面或内部零件。";
 
-export type CommerceImageParameters = { size: string; quality?: string; imageResolution?: string; count: 1; canvasSize?: string };
+/** Exactly the image parameters accepted by POST /workbench/tasks; any extra key is rejected by the backend. */
+export type CommerceImageParameters = { size: string; quality?: string; imageResolution?: string; count: 1 };
 
 export function commerceImageParameters(profile: ImageCapabilityConfig, ratio: string, resolution: string): CommerceImageParameters {
     const normalized = normalizeImageValue(profile, { size: ratio, imageResolution: resolution, quality: profile.quality.default, count: "1" });
-    const base: CommerceImageParameters = { size: String(normalized.size || ratio), quality: normalized.quality, imageResolution: normalized.imageResolution, count: 1 };
     // Submit the selected ratio itself; never substitute a wider generation canvas.
-    return { ...base, canvasSize: base.size };
+    return { size: String(normalized.size || ratio), quality: normalized.quality, imageResolution: normalized.imageResolution, count: 1 };
 }
 
-export function commerceImagePrompt(draft: EcommerceDraft, image: EcommercePlan["images"][number], productSummary = "", visualStrategy = "", parameters?: Pick<CommerceImageParameters, "canvasSize">) {
+export function commerceImagePrompt(draft: EcommerceDraft, image: EcommercePlan["images"][number], productSummary = "", visualStrategy = "", parameters?: Pick<CommerceImageParameters, "size">) {
     if (!image.manualPrompt && commerceAllowsText(draft, image.imageType)) assertCommerceConsumerCopy(image.copy || "");
     const prompt = baseCommerceImagePrompt(draft, image, productSummary, visualStrategy);
     const reference = commerceReferenceImageInstruction(draft, image);
-    const extended = Boolean(parameters?.canvasSize && parameters.canvasSize !== image.ratio);
+    const extended = Boolean(parameters?.size && parameters.size !== image.ratio);
     const fullBleed = `【画幅】按 ${extended ? "本次生成尺寸" : image.ratio} 原生构图，full bleed edge-to-edge artwork，场景与背景连续延伸到四条边。禁止上下黑条、白条、letterbox、pillarbox、相框、胶片边框；不能把横向海报缩进竖向画幅。商品参考图即使是多视角拼贴说明板，也只提取商品身份，不复制原板的分格、边框、文字布局。`;
     const frame = extended ? commerceExtendedCanvasNote(image.ratio) : commerceTallCanvasSafeArea(image.ratio);
     const typography = commerceAllowsText(draft, image.imageType) && (image.copy || "").trim() ? `\n\n${commerceTypographyInstruction}` : "";
@@ -98,12 +104,10 @@ function commerceExtendedCanvasNote(ratio: string) {
 }
 
 /**
- * Some image relays render tall canvases at 2:3 and the server crop-fills the
- * result to the requested ratio, trimming the left and right edges. Keep text
- * and product inside the central area so nothing important is cut.
+ * Background bleed must never be interpreted as permission to bleed copy or UI.
  */
 export function commerceTallCanvasSafeArea(_ratio: string) {
-    return "\n\n【防溢出安全区，所有比例适用】每一个文字块、标签、胶囊条、图标气泡、放大窗和卡片的完整外框都必须在画幅四边各内缩 8% 以内，任何元素不得贴边、出界或被裁切；两侧气泡与卡片宁可缩小、换行或减少数量，也不能伸出画面。画面四边只延续背景或场景。";
+    return "\n\n【防溢出安全区，所有比例适用】每一个文字块、标签、胶囊条、图标气泡、放大窗和卡片的完整外框（含描边、阴影及旋转后的四角）都必须在画幅四边各内缩至少 8% 的安全区内，即横纵坐标均在 8%–92% 内；任何元素不得贴边、出界或被裁切。背景满版不等于文字满版：画面四边只延续背景或场景，保留约 20%–30% 干净呼吸空间，不添加外部白框。两侧气泡与卡片要换行、向内移动或重新分栏，不能横向撑出画面；不能以裁切文字、标签或卡片制造设计感。";
 }
 
 /**
@@ -148,7 +152,7 @@ function baseCommerceImagePrompt(draft: EcommerceDraft, image: EcommercePlan["im
             `【全局创作设置】\n${commerceCreativeBrief(imageDraft)}`,
             typeConstraint,
             // A hand-edited prompt owns composition and tone, but a listing main image stays compliant.
-            listingMain ? platformRule : "",
+            platformRule,
             `【人物】${modelPlacement}\n模特执行要求：${modelInstruction}`,
             summary ? `【商品保真】商品图可见外观参考：${summary}` : "",
             `以本张用户手动编辑的提示词为最终构图、视角、场景和文案要求；不恢复旧方案文案，不擅自增写未审阅的主张。${commerceAllowsText(draft, image.imageType) ? "" : "纯图规则仍优先：不添加新文字、文字标签或营销标题。"}保留真实商品主体及参考图中可辨认的 Logo、颜色与结构；未提供的背面、接口、材质和功能只可做合理视觉探索，不得标作已验证事实。`,
@@ -282,7 +286,7 @@ export function commerceGenerationRatio(config: Config, draft: Pick<EcommerceDra
 export async function quoteCommerce(config: Config, draft: EcommerceDraft, count: number, clone = false, planning = true) {
     const imageRefs = commerceRequiredImageReferenceCount(draft, clone);
     const ratio = commerceGenerationRatio(config, draft, draft);
-    const imageRequest = modelQuoteRequest(config, draft.imageModel, "image", {
+    const imageRequest = systemModelQuoteRequest(config, draft.imageModel, "image", {
         capability: "image",
         input: { textCount: 1, imageCount: imageRefs, referenceImageCount: imageRefs, videoCount: 0, audioCount: 0, characterCount: 0 },
         imageSize: ratio,
@@ -291,7 +295,7 @@ export async function quoteCommerce(config: Config, draft: EcommerceDraft, count
     const maxAgentRefs = modelCapabilityConfigFor(config, draft.agentModel).text?.references.maxImages || 0;
     const agentRefs = commercePlanningReferenceCount(draft);
     if (planning && agentRefs > maxAgentRefs) throw new Error(`后台指定的策划模型最多读取 ${maxAgentRefs} 张图片，请减少参考图或联系管理员更换模型`);
-    const agentRequest = modelQuoteRequest(config, draft.agentModel, "text", {
+    const agentRequest = systemModelQuoteRequest(config, draft.agentModel, "text", {
         capability: "text",
         input: { textCount: 1, imageCount: agentRefs, referenceImageCount: agentRefs, videoCount: 0, audioCount: 0, characterCount: 0 },
     });
@@ -336,6 +340,11 @@ export const commerceImageSubmissionConcurrency = 3;
 
 export async function submitCommerceImages(config: Config, draft: EcommerceDraft, plan: EcommercePlan, project: EcommerceProject, onSaved: (project: EcommerceProject, plan: EcommercePlan) => void, clone = false) {
     assertCommercePlanCurrent(plan, draft);
+    for (const [index, image] of plan.images.entries()) {
+        if (image.taskId || !commerceAllowsText(draft, image.imageType)) continue;
+        const phrase = commerceRestrictedPhrase(image.copy || "");
+        if (phrase) throw new Error(`第${index + 1}张含高风险宣传词「${phrase}」，请改为有依据的具体描述后再生成`);
+    }
     plan = groundCommerceClaims(plan, draft);
     assertCommerceDetailRhythm(plan, draft);
     validateCommerceReferencePlan(plan, draft);

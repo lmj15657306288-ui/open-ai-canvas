@@ -46,8 +46,11 @@ func TestEcommerceWorkbenchDirectionsWithBuiltinKnowledge(t *testing.T) {
 	if _, err := svc.SelectEcommerceCreativeDirection("other", response.RecommendationID, response.Directions[2].ID); err == nil {
 		t.Fatal("cross-owner selection accepted")
 	}
-	if p := ecommerceWorkbenchPlatform(EcommerceDraft{Platform: "douyin", Ratio: "9:16"}); p.Label != "douyin" || p.ForbidTextOnMain {
+	if p := ecommerceWorkbenchPlatform(EcommerceDraft{Platform: "unknown-market", Ratio: "9:16"}); p.Label != "unknown-market" || p.ForbidTextOnMain {
 		t.Fatalf("unknown platform borrowed other rules: %+v", p)
+	}
+	if p := ecommerceWorkbenchPlatform(EcommerceDraft{Platform: "douyin"}); p.Label != "抖音电商" || p.ForbidTextOnMain {
+		t.Fatalf("Douyin did not use its own platform profile: %+v", p)
 	}
 	if p := ecommerceWorkbenchPlatform(EcommerceDraft{Platform: "amazon"}); !p.ForbidTextOnMain {
 		t.Fatal("Amazon rules were lost")
@@ -58,7 +61,7 @@ func TestEcommerceWorkbenchDirectionsTaskSnapshotReceiptAndOwner(t *testing.T) {
 	t.Setenv("AI_MODE", "live")
 	t.Setenv("TEXT_API_KEY", "")
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
-	svc, db, _, _ := creationTestService(t)
+	svc, db, _, _ := ecommerceCreationTestService(t)
 	if err := db.AutoMigrate(&model.EcommerceCreativeRecommendation{}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +149,7 @@ func TestEcommerceWorkbenchDirectionsTaskSnapshotReceiptAndOwner(t *testing.T) {
 // recognition stage resolves the administrator's recognition model (or the
 // planning model when none is set), and a client-chosen model is refused.
 func TestEcommerceWorkbenchAnalysisModelsAreFixedByAdministrator(t *testing.T) {
-	svc, db, _, _ := creationTestService(t)
+	svc, db, _, _ := ecommerceCreationTestService(t)
 	t.Setenv("AI_MODE", "live")
 	t.Setenv("TEXT_API_KEY", "")
 	if err := db.Model(&model.ModelChannel{}).Where("id = ?", "channel").Updates(map[string]any{"base_url": "https://example.com/v1", "api_key": "server-owned"}).Error; err != nil {
@@ -291,7 +294,7 @@ func TestEcommerceWorkbenchPlanningUsesSharedTaskAndSingleOrder(t *testing.T) {
 	t.Setenv("AI_MODE", "live")
 	t.Setenv("TEXT_API_KEY", "")
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
-	svc, db, _, _ := creationTestService(t)
+	svc, db, _, _ := ecommerceCreationTestService(t)
 	t.Setenv("REDIS_URL", "")
 	svc.coordinator, _ = platform.NewCoordinator("sqlite")
 	svc.platform = platform.New(svc.repo, svc.coordinator, platformHost{svc: svc})
@@ -418,6 +421,9 @@ func TestEcommerceWorkbenchPlanKeepsSpecializedContracts(t *testing.T) {
 			_ = json.Unmarshal([]byte(stringValue(result["text"])), &got)
 			if got.Images[0].ImageModel != draft.ImageModel || got.Images[0].Ratio != draft.Ratio || got.Images[0].Resolution != draft.Resolution {
 				t.Fatal("selected generation settings changed")
+			}
+			if !strings.Contains(got.Images[0].Prompt, ecommerceagent.LayoutSafetyRule) {
+				t.Fatal("image plan lost layout safety after server normalization")
 			}
 			if (kind == "white" || kind == "three-view") && got.Images[0].Copy != "" {
 				t.Fatal("pure product image kept copy")
@@ -715,7 +721,7 @@ func TestEcommerceWorkbenchListingMainImagesNeedNoCopy(t *testing.T) {
 }
 
 func TestEcommerceDetailDirectionsPromptStaysShortAndPlatformRouted(t *testing.T) {
-	svc, db, _, _ := creationTestService(t)
+	svc, db, _, _ := ecommerceCreationTestService(t)
 	t.Setenv("AI_MODE", "mock")
 	project, err := svc.CreateEcommerceProject("user")
 	if err != nil {

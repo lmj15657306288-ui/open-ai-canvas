@@ -103,9 +103,6 @@ type Service struct {
 	approvedMediaClosed      bool
 	providerCatalogOnce      sync.Once
 	providerCatalog          *providercatalog.Source
-	creditPolicyMu           sync.RWMutex
-	creditPolicyCache        *CreditPolicy
-	creditPolicyAt           time.Time
 	userGroups               userGroupState
 	modelAvailabilityMu      sync.RWMutex
 	modelAvailabilityCache   map[publicModelAvailabilityKey]*PublicModelAvailability
@@ -115,6 +112,9 @@ type Service struct {
 	// dramaTaskHook 只在测试中替换短剧调度的任务提交，生产路径始终走 CreateTask 准入。
 	dramaTailFrameHook func(userID, resourceID string) (string, error)
 	dramaTaskHook      func(userID string, req CreateTaskRequest, timeline *renderProject) (*model.Task, error)
+	// dramaTails 跟踪调度循环之外的尾帧抽取；dramaBackgroundRunner 为空时用后台 worker，测试替换为同步执行。
+	dramaTails            dramaTailWorker
+	dramaBackgroundRunner func(fn func()) bool
 }
 
 const taskWorkerConcurrency = 3
@@ -198,6 +198,7 @@ func (s *Service) StartWorker() {
 	s.startResourceDeletionWorker(ctx)
 	s.startResourceOffloadWorker()
 	s.startSkillSyncWorker(ctx)
+	s.startEcommerceSkillSyncWorker(ctx)
 	s.startPaymentWorker(ctx)
 	s.startBillingAutoRefundWorker()
 	s.startDramaScheduler()

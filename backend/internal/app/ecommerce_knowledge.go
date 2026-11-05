@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"yingce/backend/internal/ecommercecatalog"
 	"yingce/backend/internal/model"
 )
 
@@ -118,10 +119,14 @@ type ecommerceDirectionSeed struct {
 }
 
 func ecommerceProductCategory(req EcommerceCreativeDirectionsRequest) string {
+	if match := ecommercecatalog.ResolveProduct(req.Category, req.ProductName); match.Node.ID != "na" && match.Node.ID != "" {
+		return match.Group
+	}
 	groups := []struct {
 		name  string
 		words []string
 	}{
+		{"appliance", []string{"榨汁", "搅拌机", "果汁机", "juicer", "blender"}},
 		{"beauty", []string{"护肤", "洗面奶", "精华", "面霜", "口红", "彩妆", "美妆", "香水", "skincare", "cosmetic"}},
 		{"maternal", []string{"奶瓶", "婴儿", "母婴", "宝宝", "童装", "婴幼儿", "baby", "maternity"}},
 		{"apparel", []string{"女装", "男装", "服装", "裙", "外套", "鞋", "箱包", "珠宝", "首饰", "jewelry", "fashion"}},
@@ -392,6 +397,9 @@ func jsonArrayContains(raw, value string) bool {
 }
 
 func (s *Service) RecommendEcommerceCreativeDirections(userID string, req EcommerceCreativeDirectionsRequest) (*EcommerceCreativeDirectionsResponse, error) {
+	if err := s.RequireFeature(FeatureEcommerce); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(req.ProjectID) == "" {
 		return nil, BadAuthRequest("推荐任务缺少项目 ID")
 	}
@@ -632,7 +640,7 @@ var ecommerceCategoryTerms = map[string][]string{
 	"pet":       {"宠物"},
 }
 
-var ecommerceProductTerms = []string{"奶瓶", "奶嘴", "耳机", "手机", "键盘", "手表", "连衣裙", "女装", "外套", "鞋", "沙发", "家具", "台灯", "扫地", "吸尘器", "净化器", "加湿器", "洗面奶", "口红", "香水", "咖啡", "零食", "马桶"}
+var ecommerceProductTerms = []string{"榨汁机", "搅拌机", "破壁机", "奶瓶", "奶嘴", "耳机", "手机", "键盘", "手表", "连衣裙", "女装", "外套", "鞋", "沙发", "家具", "台灯", "扫地", "吸尘器", "净化器", "加湿器", "洗面奶", "口红", "香水", "咖啡", "零食", "马桶"}
 
 func ecommerceKnowledgeTerms(category, query string) []string {
 	terms := append([]string{}, ecommerceCategoryTerms[category]...)
@@ -656,6 +664,9 @@ func nonEmptyFacts(req EcommerceCreativeDirectionsRequest) []string {
 }
 
 func (s *Service) SelectEcommerceCreativeDirection(userID, recommendationID, directionID string) (*EcommerceCreativeDirectionSelection, error) {
+	if err := s.RequireFeature(FeatureEcommerce); err != nil {
+		return nil, err
+	}
 	item, err := s.repo.EcommerceRecommendation(userID, recommendationID)
 	if err != nil {
 		return nil, NotFound("推荐任务不存在")

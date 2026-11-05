@@ -3,16 +3,18 @@ import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router
 import { lazyAdminPage } from "@/pages/admin/admin-page-loader";
 
 import { RequireAuth } from "@/components/auth/require-auth";
+// 功能开关守卫包在页面 Suspense 之外，懒加载会让整个工作区退回全屏加载页；体积很小，直接静态引入。
+import { RequireFeature } from "@/components/auth/require-feature";
 import { FullScreenLoader, WorkspaceRouteLoader } from "@/components/ui/aceternity/full-screen-loader";
-import { loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, loadCreatePage, loadProjectCreatePage, loadProjectDetailPage, loadProjectsPage, loadSkillWorkbenchPage } from "@/lib/workspace-route-modules";
+import { workspaceRoutePages } from "@/lib/workspace-route-modules";
 import { CanvasRefreshShell } from "@/pages/canvas/canvas-refresh-shell";
 import { AuthScene } from "@/pages/auth/auth-scene";
 import RouteErrorPage from "@/pages/route-error";
 import { isGuestWorkspacePath } from "@/lib/guest-workspace";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
-const EcommercePage = lazy(() => import("@/pages/ecommerce"));
-const EcommerceKnowledgePage = lazyAdminPage(() => import("@/pages/admin/ecommerce-knowledge-page"));
+const EcommerceManagementPage = lazyAdminPage(() => import("@/pages/admin/ecommerce-management-page"));
+const EcommerceAgentConfigPage = lazyAdminPage(() => import("@/pages/admin/ecommerce-agent-config-page"));
 const AnalyticsPage = lazyAdminPage(() => import("@/pages/admin/admin-route-pages").then((module) => ({ default: module.AnalyticsPage })));
 const AnnouncementsPage = lazyAdminPage(() => import("@/pages/admin/admin-route-pages").then((module) => ({ default: module.AnnouncementsPage })));
 const BannerAnnouncementsPage = lazyAdminPage(() => import("@/pages/admin/admin-route-pages").then((module) => ({ default: module.BannerAnnouncementsPage })));
@@ -44,31 +46,32 @@ const StoryboardPromptsPage = lazyAdminPage(() => import("@/pages/admin/storyboa
 const AdminFeedbacksPage = lazyAdminPage(() => import("@/pages/admin/feedbacks/feedbacks-page"));
 const UsersPage = lazyAdminPage(() => import("@/pages/admin/users/users-page"));
 const UserGroupsPage = lazyAdminPage(() => import("@/pages/admin/user-groups/user-groups-page"));
-const AssetsPage = lazy(loadAssetsPage);
+const AssetsPage = workspaceRoutePages.assets;
 const LoginPage = lazy(() => import("@/pages/auth/login"));
 const RegisterPage = lazy(() => import("@/pages/auth/register"));
 const ForgotPasswordPage = lazy(() => import("@/pages/auth/forgot-password"));
-const CanvasPage = lazy(loadCanvasPage);
-const CanvasProjectPage = lazy(loadCanvasProjectPage);
+const CanvasPage = workspaceRoutePages.canvas;
+const CanvasProjectPage = workspaceRoutePages.canvasProject;
 const SharedCanvasPage = lazy(() => import("@/pages/canvas/shared"));
-const CreatePage = lazy(loadCreatePage);
-const ImageWorkbenchPage = lazy(() => import("@/pages/workbench/image-workbench-route"));
-const VideoWorkbenchPage = lazy(() => import("@/pages/workbench/video-workbench-page"));
+const CreatePage = workspaceRoutePages.create;
+const EcommercePage = workspaceRoutePages.ecommerce;
+const ImageWorkbenchPage = workspaceRoutePages.imageWorkbench;
+const VideoWorkbenchPage = workspaceRoutePages.videoWorkbench;
+const HypitWorkbenchPage = lazy(() => import("@/pages/hypit/hypit-workbench-page"));
 const NotFound = lazy(() => import("@/pages/not-found"));
-const SkillsPage = lazy(() => import("@/pages/skills"));
-const SkillWorkbenchPage = lazy(loadSkillWorkbenchPage);
-const PluginsPage = lazy(() => import("@/pages/plugins"));
-const EagleLibraryPage = lazy(() => import("@/pages/plugins/eagle"));
-const TasksPage = lazy(() => import("@/pages/tasks"));
-const ProjectsPage = lazy(loadProjectsPage);
-const ProjectDetailPage = lazy(loadProjectDetailPage);
-const ProjectCreatePage = lazy(loadProjectCreatePage);
-const SettingsPage = lazy(() => import("@/pages/settings"));
-const ReferralPage = lazy(() => import("@/pages/referral"));
+const SkillsPage = workspaceRoutePages.skills;
+const SkillWorkbenchPage = workspaceRoutePages.skillWorkbench;
+const PluginsPage = workspaceRoutePages.plugins;
+const EagleLibraryPage = workspaceRoutePages.eagleLibrary;
+const TasksPage = workspaceRoutePages.tasks;
+const ProjectsPage = workspaceRoutePages.projects;
+const ProjectDetailPage = workspaceRoutePages.projectDetail;
+const ProjectCreatePage = workspaceRoutePages.projectCreate;
+const SettingsPage = workspaceRoutePages.settings;
+const ReferralPage = workspaceRoutePages.referral;
 const AdminReferralPage = lazyAdminPage(() => import("@/pages/admin/referral/referral-admin-page"));
 const TestVoiceRecording = lazy(() => import("@/pages/test-voice-recording"));
 const UserLayout = lazy(() => import("@/layouts/user-layout"));
-const RequireFeature = lazy(() => import("@/components/auth/require-feature").then((module) => ({ default: module.RequireFeature })));
 
 function deferred(element: ReactNode) {
     return <Suspense fallback={<WorkspaceRouteLoader />}>{element}</Suspense>;
@@ -142,6 +145,14 @@ export const router = createBrowserRouter([
                 element: (
                     <RequireAuth>
                         <RequireFeature feature="videoWorkbenchEnabled">{deferred(<VideoWorkbenchPage />)}</RequireFeature>
+                    </RequireAuth>
+                ),
+            },
+            {
+                path: "/toolbox/hypit",
+                element: (
+                    <RequireAuth>
+                        <RequireFeature feature="hypitWorkbenchEnabled">{deferred(<HypitWorkbenchPage />)}</RequireFeature>
                     </RequireAuth>
                 ),
             },
@@ -233,6 +244,17 @@ export const router = createBrowserRouter([
                     { path: "channels", element: <ChannelsPage /> },
                     // 关闭前台模型只影响用户端模型来源；后台仍可进入，便于开启前先配置。
                     { path: "models", element: <LogicalModelsPage /> },
+                    { path: "ecommerce", element: <Navigate to="/admin/ecommerce/agent" replace /> },
+                    { path: "ecommerce/agent", element: <EcommerceAgentConfigPage /> },
+                    { path: "ecommerce/library", element: <EcommerceManagementPage /> },
+                    { path: "ecommerce/library/skills", element: <EcommerceManagementPage /> },
+                    { path: "ecommerce/library/categories", element: <EcommerceManagementPage /> },
+                    // 旧地址：知识库、Skills、品类并入「知识与技能」，小夜设置并入「电商 Agent 配置」
+                    { path: "ecommerce/skills", element: <Navigate to="/admin/ecommerce/library/skills" replace /> },
+                    { path: "ecommerce/categories", element: <Navigate to="/admin/ecommerce/library/categories" replace /> },
+                    { path: "ecommerce-knowledge", element: <Navigate to="/admin/ecommerce/library" replace /> },
+                    { path: "ecommerce-skills", element: <Navigate to="/admin/ecommerce/library/skills" replace /> },
+                    { path: "ecommerce-categories", element: <Navigate to="/admin/ecommerce/library/categories" replace /> },
                     { path: "plugins", element: <AdminPluginsPage /> },
                     { path: "workbench-tools", element: <WorkbenchToolsPage /> },
                     { path: "skill-curation", element: <SkillCurationPage /> },
@@ -243,7 +265,6 @@ export const router = createBrowserRouter([
                     { path: "banner-announcements", element: <BannerAnnouncementsPage /> },
                     { path: "agent-lessons", element: <AgentLessonsPage /> },
                     { path: "resources", element: <StorageResourcesPage /> },
-                    { path: "ecommerce-knowledge", element: <EcommerceKnowledgePage /> },
                     { path: "credit-operations", element: <CreditOperationsPage /> },
                     { path: "redemption-codes", element: <RedemptionCodesPage /> },
                     { path: "referral", element: <AdminReferralPage /> },

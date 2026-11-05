@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"yingce/backend/internal/ecommerceagent"
 	"yingce/backend/internal/model"
 	"yingce/backend/internal/repository"
 )
@@ -137,6 +138,9 @@ func (s *Service) EcommerceSkillPrompt(userID string, ids []string) (string, err
 }
 
 func (s *Service) CreateEcommerceProject(userID string) (*model.EcommerceProject, error) {
+	if err := s.RequireFeature(FeatureEcommerce); err != nil {
+		return nil, err
+	}
 	project := &model.EcommerceProject{ID: newID(), UserID: userID, Name: "未命名商品", Status: "draft", DraftJSON: "{}", PlanJSON: "{}", Revision: 1}
 	if err := s.repo.CreateEcommerceProject(project); err != nil {
 		return nil, err
@@ -202,6 +206,9 @@ func (s *Service) EcommerceProjectPage(userID string, page, pageSize int) ([]mod
 }
 
 func (s *Service) DeleteEcommerceProjects(userID string, req DeleteEcommerceProjectsRequest) (int64, error) {
+	if err := s.RequireFeature(FeatureEcommerce); err != nil {
+		return 0, err
+	}
 	if req.ExpectedTotal == nil || *req.ExpectedTotal < 1 || (req.All && len(req.IDs) != 0) || (!req.All && (len(req.IDs) == 0 || len(req.IDs) > 1000)) {
 		return 0, BadAuthRequest("删除项目参数无效")
 	}
@@ -224,6 +231,9 @@ func (s *Service) DeleteEcommerceProjects(userID string, req DeleteEcommerceProj
 	return deleted, err
 }
 func (s *Service) SaveEcommerceProject(userID, id string, req SaveEcommerceProjectRequest) (*model.EcommerceProject, error) {
+	if err := s.RequireFeature(FeatureEcommerce); err != nil {
+		return nil, err
+	}
 	project, err := s.EcommerceProject(userID, id)
 	if err != nil {
 		return nil, err
@@ -327,6 +337,30 @@ func (s *Service) SaveEcommerceProject(userID, id string, req SaveEcommerceProje
 		}
 	}
 	if req.Plan != nil {
+		if len(req.Plan.Images) == 0 && len(req.Plan.PreviousImages) == 0 {
+			return nil, BadAuthRequest("策划图片不能为空")
+		}
+		if len(req.Plan.PreviousImages)+len(req.Plan.Images) > 500 {
+			return nil, BadAuthRequest("当前画布已达500张历史图片，请新建项目继续")
+		}
+		seen := map[string]bool{}
+		for _, image := range append(append([]model.EcommercePlanTask{}, req.Plan.PreviousImages...), req.Plan.Images...) {
+			if image.ID == "" || seen[image.ID] {
+				return nil, BadAuthRequest("画布图片ID重复或为空")
+			}
+			seen[image.ID] = true
+		}
+		for _, image := range req.Plan.PreviousImages {
+			if len(image.SourceDraft) > 128<<10 {
+				return nil, BadAuthRequest("历史图片参数快照过长")
+			}
+			task, err := s.repo.TaskForUser(userID, image.TaskID)
+			if image.TaskID == "" || err != nil || task.Type != "canvas_image" {
+				return nil, BadAuthRequest("历史生成任务不存在或不属于当前用户")
+			}
+		}
+	}
+	if req.Plan != nil && len(req.Plan.Images) > 0 {
 		if err := s.validateEcommercePlan(userID, req.Plan); err != nil {
 			return nil, err
 		}
@@ -507,6 +541,14 @@ func (s *Service) validateEcommercePlan(userID string, plan *model.EcommercePlan
 		}
 		if len(image.Prompt) > 32000 {
 			return BadAuthRequest("图片提示词过长")
+		}
+		if image.TaskID == "" {
+			if ecommerceagent.PlatformNoText(image.Platform, image.ImageType, "") && strings.TrimSpace(image.Copy) != "" {
+				return BadAuthRequest(fmt.Sprintf("第%d张按所选平台采用无新增文字方案，请清空文案后再生成", index+1))
+			}
+			if phrase := ecommerceagent.RestrictedListingPhrase(image.Copy); phrase != "" {
+				return BadAuthRequest(fmt.Sprintf("第%d张文案含高风险宣传词「%s」，请改为有依据的具体描述", index+1, phrase))
+			}
 		}
 		if image.TaskID != "" {
 			if seenTasks[image.TaskID] {
