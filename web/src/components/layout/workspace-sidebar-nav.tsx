@@ -57,9 +57,9 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
             items: [
                 ...(features.imageWorkbenchEnabled ? [{ id: "toolbox-image", title: "图片生成", icon: ImageIcon, to: "/toolbox/image" }] : []),
                 ...(features.videoWorkbenchEnabled ? [{ id: "toolbox-video", title: "视频生成", icon: Video, to: "/toolbox/video" }] : []),
-                // 复刻视频的常规入口是工作台顶部的类型切换；只有生图/视频工作台都关闭、
+                // 复刻视频的常规入口是视频生成顶部的类型切换；只有视频工作台关闭、
                 // 顶部标签不可达时，才在侧栏补一个入口，避免功能被藏起来。
-                ...(features.hypitWorkbenchEnabled && !features.imageWorkbenchEnabled && !features.videoWorkbenchEnabled ? [{ id: "toolbox-hypit", title: "复刻视频", icon: Film, to: "/toolbox/hypit" }] : []),
+                ...(features.hypitWorkbenchEnabled && !features.videoWorkbenchEnabled ? [{ id: "toolbox-hypit", title: "复刻视频", icon: Film, to: "/toolbox/hypit" }] : []),
                 { ...toolItem("skills", "/skills"), title: "技能" },
                 ...(features.pluginCenterEnabled ? [{ ...toolItem("plugins", "/plugins"), title: "插件" }] : []),
             ],

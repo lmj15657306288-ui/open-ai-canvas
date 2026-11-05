@@ -73,7 +73,9 @@ export function generationErrorMessage(error: unknown) {
         const prefix = original.slice(0, upstreamIndex).trim();
         if (isContentModerationError(prefix)) return CONTENT_MODERATION_MESSAGE;
         const hint = actionableUpstreamReason(original.slice(upstreamIndex + "；上游：".length));
-        if (hint) return sanitizeUserVisibleError(prefix ? `${prefix}；${hint}` : hint);
+        // 上游给出可执行原因时只回这句话：前缀常是平台自己归类的「模型服务暂时不可用（HTTP 5xx）」，
+        // 和「素材超时长」并排出现会让用户以为是服务抖动、只要重试就好。
+        if (hint) return hint;
     }
     const raw = sanitizeUserVisibleError(original);
     if (isContentModerationError(raw)) return contentModerationMessage(raw);
@@ -119,10 +121,34 @@ function sanitizeUserVisibleError(value: string) {
     return result.replace(USER_VISIBLE_TASK_ID_PATTERN, "[任务标识已隐藏]");
 }
 
+/** 上游常在业务错误里直接写「这段视频是 17.0 秒，超过 15 秒上限」：这是用户能自己修的原因，必须留下。 */
+const DURATION_LIMIT_PATTERN = /(\d+(?:\.\d+)?)\s*秒[^。；]{0,24}?(\d+(?:\.\d+)?)\s*秒\s*(?:的)?\s*(?:上限|限制|最长)/;
+const DURATION_LIMIT_HINT_PATTERN = /(?:视频|音频|素材|参考).{0,10}(?:时长|长度|秒数).{0,12}(?:超过|超出|太长|过长)/;
+
+function durationText(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return value;
+    return Number.isInteger(parsed) ? String(parsed) : String(Math.round(parsed * 10) / 10);
+}
+
+/** 上游说的是「这段视频 17 秒」，措辞跟着素材类型走，别让用户以为是生成时长限制。 */
+function materialLabel(value: string) {
+    if (value.includes("视频")) return "参考视频";
+    if (value.includes("音频")) return "参考音频";
+    return "参考素材";
+}
+
 function actionableUpstreamReason(value: string) {
     const lower = value.toLowerCase();
     const image = lower.includes("image") || lower.includes("图片") || lower.includes("file") || lower.includes("参考图");
-    const tooLarge = lower.includes("too large") || lower.includes("exceed") || lower.includes("超过") || lower.includes("25mb") || lower.includes("25 mb");
+    const tooLarge = /too large|exceed|超过|超大|超限|太大|25\s?mb|超出[^。；]{0,6}(?:大小|尺寸|体积|上限)/.test(lower);
+    const duration = value.match(DURATION_LIMIT_PATTERN);
+    if (duration) {
+        const actual = durationText(duration[1]);
+        const limit = durationText(duration[2]);
+        return `${materialLabel(value)} ${actual} 秒，超过 ${limit} 秒上限，请裁剪到 ${limit} 秒内再上传。`;
+    }
+    if (DURATION_LIMIT_HINT_PATTERN.test(value)) return `${materialLabel(value)}时长超过模型支持的上限，请裁剪后再上传。`;
     if (image && tooLarge) return "参考图片超过模型支持的大小限制，请压缩图片后重试。";
     if (lower.includes("model_not_found") || lower.includes("model not found") || lower.includes("无可用渠道")) return "当前模型暂无可用渠道，请更换模型或联系管理员。";
     if (image && (lower.includes("unsupported size") || lower.includes("图片尺寸不支持") || lower.includes("unsupported format") || lower.includes("图片格式不支持"))) return "参考图片的尺寸或格式不符合模型要求，请调整图片后重试。";

@@ -18,7 +18,8 @@ export function assertVideoCapability(
     if (profile.references.maxImageBytes > 0 && references.some((image) => (image.bytes || 0) > profile.references.maxImageBytes)) throw new Error("参考图片文件超过当前模型大小限制");
     for (const video of videoReferences) {
         if (profile.references.maxVideoBytes > 0 && (video.bytes || 0) > profile.references.maxVideoBytes) throw new Error("参考视频文件超过当前模型大小限制");
-        if (profile.references.maxVideoDurationSeconds > 0 && (video.durationMs || 0) > profile.references.maxVideoDurationSeconds * 1000) throw new Error("参考视频时长超过当前模型限制");
+        const durationLimit = profile.references.maxVideoDurationSeconds;
+        if (durationLimit > 0 && (video.durationMs || 0) > durationLimit * 1000) throw new Error(`参考视频 ${Math.round((video.durationMs || 0) / 1000)} 秒，超过 ${durationLimit} 秒上限，请裁剪后再传`);
     }
     for (const audio of audioReferences) {
         if (profile.references.maxAudioBytes > 0 && (audio.bytes || 0) > profile.references.maxAudioBytes) throw new Error("参考音频文件超过当前模型大小限制");

@@ -4,6 +4,7 @@ import { XCircle } from "lucide-react";
 
 import { CanvasImagePreview } from "@/components/canvas/canvas-image-preview";
 import { TaskDetailItem } from "./canvas-project-feedback";
+import { generationErrorMessage } from "@/lib/generation-error";
 import { canCancelGenerationTask, generationTaskShowsProgress, generationTaskStageLabel } from "@/lib/generation-task-display";
 import { formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -45,6 +46,7 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
                             <TaskDetailItem label="完成时间" value={formatTaskTime(task.completedAt)} />
                             <TaskDetailItem label="耗时" value={formatTaskDuration(task)} />
                         </div>
+                        <TaskFailureReason task={task} theme={theme} />
                         <div>
                             <div className="mb-2 text-xs font-semibold" style={{ color: theme.node.muted }}>
                                 提示词
@@ -147,6 +149,20 @@ function ResolvedCanvasVideoPreview({ node }: { node: CanvasNodeData }) {
     if (failed) return <div className="grid min-h-72 w-full place-items-center text-sm text-white/55">视频地址获取失败，请关闭后重试</div>;
     if (!src) return <div className="grid min-h-72 w-full place-items-center text-sm text-white/55">正在加载视频…</div>;
     return <VideoPlayer src={src} mimeType={node.metadata?.mimeType} title={node.title || "视频预览"} hasAudio={typeof node.metadata?.hasAudio === "boolean" ? node.metadata.hasAudio : undefined} className="max-h-[84vh] max-w-full bg-black" />;
+}
+
+/** 失败必须给原因和下一步：任务里存了后端写入的失败说明，这里翻译成用户能照做的一句话。 */
+function TaskFailureReason({ task, theme }: { task: GenerationTask; theme: CanvasProjectStatusDialogsProps["theme"] }) {
+    if (task.status !== "failed") return null;
+    const reason = task.error ? generationErrorMessage(task.error) : "这次没有记录到失败原因。可以重新生成，或先确认参考素材和所选模型是否满足要求。";
+    return (
+        <div>
+            <div className="mb-2 text-xs font-semibold" style={{ color: theme.node.muted }}>
+                失败原因
+            </div>
+            <div className="task-detail-error whitespace-pre-wrap rounded-lg px-3 py-2 text-xs leading-5">{reason}</div>
+        </div>
+    );
 }
 
 function TaskGenerationParameters({ inputJson, theme }: { inputJson?: string; theme: CanvasProjectStatusDialogsProps["theme"] }) {

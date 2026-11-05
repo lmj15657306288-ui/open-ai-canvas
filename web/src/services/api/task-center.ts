@@ -1,4 +1,4 @@
-import { generationErrorMessage } from "@/lib/generation-error";
+import { generationErrorMessage, redactUpstreamAddress } from "@/lib/generation-error";
 import { http, apiBaseURL, type BackendEnvelope } from "@/services/api/request";
 import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamEvent } from "@/services/api/task-text-stream";
 import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
@@ -122,6 +122,8 @@ export type TaskLog = {
     stage: string;
     errorCode?: string;
     provenance: "task_state" | "provider_observation" | "background_reconcile" | "manual_refresh" | "backend";
+    /** 后端日志正文的可读摘要（已去掉上游地址、压平换行并截断）。 */
+    message?: string;
     observedAt?: string;
     createdAt: string;
 };
@@ -373,13 +375,27 @@ export async function listTaskLogs(id: string) {
 }
 
 export function formatTaskLog(log: TaskLog) {
-    return [`stage=${log.stage}`, ...(log.errorCode ? [`error=${log.errorCode}`] : []), `provenance=${log.provenance}`, ...(log.observedAt ? [`observedAt=${log.observedAt}`] : [])].join(" ");
+    return [`stage=${log.stage}`, ...(log.errorCode ? [`error=${log.errorCode}`] : []), `provenance=${log.provenance}`, ...(log.message ? [`message=${log.message}`] : []), ...(log.observedAt ? [`observedAt=${log.observedAt}`] : [])].join(" ");
+}
+
+/**
+ * 后端日志正文摘成一行给用户看：脱掉上游地址、压平空白、超长截断。
+ * 只保留摘要，不整段回显 payload，避免把上游原始响应带进界面。
+ */
+function safeTaskLogMessage(message: unknown, payload: unknown) {
+    const parts = [message, payload].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    if (!parts.length) return undefined;
+    const text = redactUpstreamAddress(parts.join(" ").replace(/\s+/g, " ").trim());
+    if (!text) return undefined;
+    const limit = 220;
+    return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
 export function projectBackendSafeTaskLog(taskId: string, raw: { level?: unknown; message?: unknown; payload?: unknown; createdAt?: unknown }, index: number): TaskLog {
     const text = [raw.message, raw.payload].filter((value): value is string => typeof value === "string").join(" ");
     const stage = safeTaskLogStage(text) || "backend_event";
     const errorCode = safeTaskLogErrorCode(text);
+    const message = safeTaskLogMessage(raw.message, raw.payload);
     const createdAt = typeof raw.createdAt === "string" && Number.isFinite(Date.parse(raw.createdAt)) ? raw.createdAt : "1970-01-01T00:00:00.000Z";
     return {
         id: `safe:${taskId}:${index}`,
@@ -388,6 +404,7 @@ export function projectBackendSafeTaskLog(taskId: string, raw: { level?: unknown
         stage,
         ...(errorCode ? { errorCode } : {}),
         provenance: "backend",
+        ...(message ? { message } : {}),
         createdAt,
     };
 }

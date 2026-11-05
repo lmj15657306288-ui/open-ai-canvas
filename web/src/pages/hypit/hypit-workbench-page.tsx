@@ -1,5 +1,5 @@
 import { App, Button, Input, Progress } from "antd";
-import { ArrowUp, Check, CircleAlert, Clapperboard, Download, Film, FolderOpen, Image as ImageIcon, ImagePlus, LayoutGrid, Music, RefreshCw, RotateCcw, Upload, X, XCircle } from "lucide-react";
+import { ArrowUp, Check, CircleAlert, Clapperboard, Download, Film, FolderOpen, ImagePlus, LayoutGrid, Music, RefreshCw, RotateCcw, Upload, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
@@ -9,19 +9,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { AntTooltip as Tooltip } from "@/components/ui/base/tooltip/ant-tooltip";
 import { cn } from "@/lib/utils";
 import { ChoiceChips, ComposerSection, SwitchRow } from "@/pages/workbench/workbench-composer";
-import {
-    HYPIT_MODE_LABELS,
-    HYPIT_STATUS_LABELS,
-    HYPIT_VOICE_LABELS,
-    cancelHypitTask,
-    createHypitTask,
-    hypitTaskIsActive,
-    listHypitTasks,
-    type HypitMaterialSlot,
-    type HypitReplicaMode,
-    type HypitTask,
-    type HypitVoiceMode,
-} from "@/services/api/hypit";
+import { HYPIT_MODE_LABELS, HYPIT_STATUS_LABELS, HYPIT_VOICE_LABELS, cancelHypitTask, createHypitTask, hypitTaskIsActive, listHypitTasks, type HypitMaterialSlot, type HypitReplicaMode, type HypitTask, type HypitVoiceMode } from "@/services/api/hypit";
 import { uploadResourceFile } from "@/services/api/resources";
 import { selectableModelsByCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -392,10 +380,7 @@ export default function HypitWorkbenchPage() {
     }, [activeTask, refreshTasks]);
 
     /** 声音选「替换音频」时，在素材区多出一个音频槽位。 */
-    const voiceSlots: SlotSpec[] = useMemo(
-        () => (voiceMode === "replace" ? [{ slot: "voice", label: "替换音频", hint: "mp3 / wav，选填时长接近原片", kind: "audio", max: 1 }] : []),
-        [voiceMode],
-    );
+    const voiceSlots: SlotSpec[] = useMemo(() => (voiceMode === "replace" ? [{ slot: "voice", label: "替换音频", hint: "mp3 / wav，选填时长接近原片", kind: "audio", max: 1 }] : []), [voiceMode]);
     const activeSlots = useMemo(() => [...spec.slots, ...voiceSlots], [spec, voiceSlots]);
 
     const slotLimit = useCallback((slot: string): number => activeSlots.find((item) => item.slot === slot)?.max ?? MAX_PER_SLOT, [activeSlots]);
@@ -604,10 +589,10 @@ export default function HypitWorkbenchPage() {
                     <header className="wb-composer-head">
                         <h1 className="sr-only">复刻视频</h1>
                         <nav className="wb-kind-switch" aria-label="切换创作类型">
-                            {features.imageWorkbenchEnabled ? (
-                                <button type="button" aria-pressed={false} aria-label="商品图片" onClick={() => navigate("/toolbox/image")}>
-                                    <ImageIcon />
-                                    商品图片
+                            {features.videoWorkbenchEnabled ? (
+                                <button type="button" aria-pressed={false} aria-label="商品视频" onClick={() => navigate("/toolbox/video")}>
+                                    <Clapperboard />
+                                    商品视频
                                 </button>
                             ) : null}
                             <button type="button" aria-pressed aria-label="复刻视频" className="is-active">
@@ -624,7 +609,13 @@ export default function HypitWorkbenchPage() {
 
                     <div className="wb-composer-scroll">
                         <ComposerSection title="替换类型" hint="选一种要替换的内容">
-                            <ChoiceChips label="替换类型" value={typeID} columns={4} options={REPLICA_TYPES.map((item) => ({ value: item.id, label: item.label, caption: item.slots[0]?.label, title: item.hint }))} onChange={(value) => setTypeID(value as HypitReplicaMode)} />
+                            <ChoiceChips
+                                label="替换类型"
+                                value={typeID}
+                                columns={4}
+                                options={REPLICA_TYPES.map((item) => ({ value: item.id, label: item.label, caption: item.slots[0]?.label, title: item.hint }))}
+                                onChange={(value) => setTypeID(value as HypitReplicaMode)}
+                            />
                             <p className="wb-muted-note">{spec.hint}</p>
                             <div className="hypit-tip">
                                 {spec.tip.good.map((text) => (
@@ -778,13 +769,7 @@ export default function HypitWorkbenchPage() {
 
                         <ComposerSection title="补充说明" hint="可选">
                             <div className="wb-prompt">
-                                <textarea
-                                    className="wb-prompt-input"
-                                    value={instructions}
-                                    maxLength={spec.instructionMax}
-                                    onChange={(event) => setInstructions(event.target.value)}
-                                    placeholder={spec.instructionPlaceholder}
-                                />
+                                <textarea className="wb-prompt-input" value={instructions} maxLength={spec.instructionMax} onChange={(event) => setInstructions(event.target.value)} placeholder={spec.instructionPlaceholder} />
                                 <div className="wb-prompt-meta">
                                     <span>
                                         {instructions.length} / {spec.instructionMax}
@@ -892,12 +877,7 @@ export default function HypitWorkbenchPage() {
 
                         {tasks.length === 0 ? (
                             <div className="wb-empty">
-                                <WorkspaceState
-                                    compact
-                                    icon="assets"
-                                    title="还没有复刻结果"
-                                    description="左侧选好替换类型，上传素材和参考视频，点「开始生成」后成片会按任务保存在这里。"
-                                />
+                                <WorkspaceState compact icon="assets" title="还没有复刻结果" description="左侧选好替换类型，上传素材和参考视频，点「开始生成」后成片会按任务保存在这里。" />
                             </div>
                         ) : (
                             <div className="wb-batch-list">

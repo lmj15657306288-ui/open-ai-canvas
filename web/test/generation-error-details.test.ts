@@ -25,4 +25,13 @@ describe("safe upstream error details", () => {
     test("upstream marker does not bypass URL hiding", () => {
         expect(generationErrorMessage("模型服务请求失败；上游：https://private.test")).toBe("模型服务请求失败");
     });
+    test("keeps an actionable upstream duration limit instead of the generic HTTP hint", () => {
+        // 生产任务 agf3842c…：万相 3.0 因为参考视频 17 秒超过 15 秒上限失败，
+        // 平台把它包成了 HTTP 502，旧实现只回「模型服务暂时不可用，请稍后再试。」。
+        const message = "模型服务暂时不可用（HTTP 502）；上游：万相 3.0 创建任务失败: 这段视频是 17.0 秒，超过 15 秒上限，请裁剪到 15 秒内再传";
+        expect(generationErrorMessage(message)).toBe("参考视频 17 秒，超过 15 秒上限，请裁剪到 15 秒内再上传。");
+    });
+    test("duration limit without numbers still tells the user to shorten the material", () => {
+        expect(generationErrorMessage("生成失败；上游：参考视频时长超过模型限制，请重新上传")).toContain("裁剪");
+    });
 });

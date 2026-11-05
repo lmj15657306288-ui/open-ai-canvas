@@ -1,5 +1,5 @@
 import { App, Button } from "antd";
-import { Clapperboard, Film, Image as ImageIcon, RotateCcw } from "lucide-react";
+import { Clapperboard, Film, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -1353,7 +1353,6 @@ export function WorkbenchPage({ kind }: { kind: WorkbenchKind }) {
               : Array.from({ length: Math.floor(((videoProfile.duration.max || 15) - (videoProfile.duration.min || 1)) / (videoProfile.duration.step || 1)) + 1 }, (_, index) => (videoProfile.duration.min || 1) + index * (videoProfile.duration.step || 1))
           ).map((value) => ({ value: String(value), label: `${value} 秒` }))
         : [];
-    const bothKinds = features.imageWorkbenchEnabled && features.videoWorkbenchEnabled;
     const galleryCount = galleryBatches.reduce((sum, batch) => sum + batch.outputs.length, 0);
 
     const specControls =
@@ -1439,21 +1438,17 @@ export function WorkbenchPage({ kind }: { kind: WorkbenchKind }) {
                 <aside className="wb-composer" aria-label={`${kindLabel}创作面板`} onPasteCapture={handlePaste}>
                     <header className="wb-composer-head">
                         <h1 className="sr-only">{kindLabel}生成</h1>
-                        {kind === "image" && (features.imageWorkbenchEnabled || features.hypitWorkbenchEnabled) ? (
-                            // 工作台只保留两类：商品图片与复刻视频。视频生成仍从侧栏进入。
+                        {kind === "video" && features.hypitWorkbenchEnabled ? (
+                            // 复刻视频属于视频生成：和商品视频并列在同一个类型切换里，不再出现在图片生成。
                             <nav className="wb-kind-switch" aria-label="切换创作类型">
-                                {features.imageWorkbenchEnabled ? (
-                                    <button type="button" aria-pressed aria-label="商品图片" className="is-active">
-                                        <ImageIcon />
-                                        商品图片
-                                    </button>
-                                ) : null}
-                                {features.hypitWorkbenchEnabled ? (
-                                    <button type="button" aria-pressed={false} aria-label="复刻视频" onClick={() => navigate("/toolbox/hypit")}>
-                                        <Film />
-                                        复刻视频
-                                    </button>
-                                ) : null}
+                                <button type="button" aria-pressed aria-label="商品视频" className="is-active">
+                                    <Clapperboard />
+                                    商品视频
+                                </button>
+                                <button type="button" aria-pressed={false} aria-label="复刻视频" onClick={() => navigate("/toolbox/hypit")}>
+                                    <Film />
+                                    复刻视频
+                                </button>
                             </nav>
                         ) : (
                             <strong className="wb-composer-title">{kind === "image" ? "商品图片" : "商品视频"}</strong>
