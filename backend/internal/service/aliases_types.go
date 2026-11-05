@@ -14,8 +14,6 @@ type (
 	HypitTaskCreateRequest                 = app.HypitTaskCreateRequest
 	HypitTaskPage                          = app.HypitTaskPage
 	HypitWorkerReportRequest               = app.HypitWorkerReportRequest
-	YoruSettings                           = app.YoruSettings
-	YoruChatRequest                        = app.YoruChatRequest
 	SaveEcommerceProjectRequest            = app.SaveEcommerceProjectRequest
 	EcommerceCreativeDirectionsRequest     = app.EcommerceCreativeDirectionsRequest
 	EcommerceStyleChoice                   = app.EcommerceStyleChoice
