@@ -260,7 +260,28 @@ export function isResourceUrl(url?: string) {
 
 // 超过该阈值（与后端单请求 multipart 上限 50MB 一致）的本地媒体走分片上传，避免大视频导入失败。
 const CHUNK_UPLOAD_THRESHOLD = 50 << 20;
-const CHUNK_UPLOAD_RETRIES = 2;
+// 单片失败只重传该片：后端按 index 覆盖写并按字节数校验，重复 PUT 是幂等的。
+// 跨洋链路抖动多表现为单片超时/断连，整传重来会把已成功的几百 MB 全部重发。
+const CHUNK_ATTEMPTS_PER_CHUNK = 3;
+// 只有「会话不存在/已过期」才重开会话（新会话目录为空，只能全量重传）。
+const CHUNK_SESSION_RESTARTS = 2;
+const CHUNK_RETRY_BASE_DELAY_MS = 250;
+
+function isUploadAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === "AbortError";
+}
+
+// 后端 PUT/合并时会话失效返回 404，此时旧分片目录已不可复用。
+function isChunkSessionExpired(error: unknown) {
+    return error instanceof ApiError && error.status === 404;
+}
+
+// 鉴权/配额/体积类失败重试不会自愈；400 仍允许重试（后端「分片上传不完整，请重试」也是 400）。
+const CHUNK_PERMANENT_STATUSES = new Set([401, 403, 413, 415]);
+
+function retryDelay(attempt: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, CHUNK_RETRY_BASE_DELAY_MS * 2 ** attempt));
+}
 
 export async function uploadResourceFile(file: Blob, kind: "image" | "video" | "audio" | "file", meta?: ResourceUploadMeta, onProgress?: (uploadedBytes: number, totalBytes: number) => void): Promise<RemoteResource> {
     const name = meta?.fileName || (file instanceof File ? file.name : `${kind}.${extensionFromMime(file.type, kind)}`);
@@ -294,17 +315,17 @@ export async function uploadResourceFile(file: Blob, kind: "image" | "video" | "
 }
 
 // 分片上传：POST 开始会话 → 逐片 PUT 原始二进制（每片 8MB）→ POST 合并落库。
-// 单请求体积小、可断点续传/失败重试；单文件不再受 50MB 限制（仅日/总量配额约束）。
+// 单请求体积小、单片可独立重试；单文件不再受 50MB 限制（仅日/总量配额约束）。
 async function uploadFileInChunks(file: Blob, name: string, kind: "image" | "video" | "audio" | "file", meta: ResourceUploadMeta | undefined, onProgress?: (uploadedBytes: number, totalBytes: number) => void) {
-    // 片级失败通常意味着会话过期/网络抖动：整体重开一次会话重传（整传重试）。
-    for (let attempt = 0; attempt < CHUNK_UPLOAD_RETRIES; attempt++) {
+    // 会话内失败已由片级重试消化；只有会话失效才需要重开（重开后目录为空，必须全量重传）。
+    for (let restart = 0; ; restart++) {
         try {
             return await runChunkedUpload(file, name, kind, meta, onProgress);
         } catch (error) {
-            if (attempt === CHUNK_UPLOAD_RETRIES - 1) throw error;
+            if (isUploadAbortError(error) || !isChunkSessionExpired(error) || restart >= CHUNK_SESSION_RESTARTS) throw error;
+            await retryDelay(restart);
         }
     }
-    throw new Error("上传失败");
 }
 
 async function runChunkedUpload(file: Blob, name: string, kind: "image" | "video" | "audio" | "file", meta: ResourceUploadMeta | undefined, onProgress?: (uploadedBytes: number, totalBytes: number) => void) {
@@ -317,12 +338,30 @@ async function runChunkedUpload(file: Blob, name: string, kind: "image" | "video
         const start = index * session.chunkSize;
         const end = Math.min(file.size, start + session.chunkSize);
         const blob = file.slice(start, end);
-        // raw 二进制直传，与后端按裸 body 逐片落盘对齐。
-        await http.put<{ index: number }>(`/resources/uploads/${encodeURIComponent(session.uploadId)}/chunks/${index}`, blob, {
-            timeout: uploadTimeoutMs(blob.size),
-            headers: { "Content-Type": "application/octet-stream" },
-            onUploadProgress: onProgress ? ({ loaded }) => onProgress(start + Math.min(loaded, blob.size), file.size) : undefined,
-        });
+        let lastError: unknown;
+        let succeeded = false;
+        // 同一会话内只重传失败片：后端按 index 覆盖写，已成功的片无需重发。
+        for (let attempt = 0; attempt < CHUNK_ATTEMPTS_PER_CHUNK; attempt++) {
+            try {
+                // raw 二进制直传，与后端按裸 body 逐片落盘对齐。
+                await http.put<{ index: number }>(`/resources/uploads/${encodeURIComponent(session.uploadId)}/chunks/${index}`, blob, {
+                    timeout: uploadTimeoutMs(blob.size),
+                    headers: { "Content-Type": "application/octet-stream" },
+                    // 重试时不再上报片内进度，避免进度条回退；片成功后统一报一次完成值。
+                    onUploadProgress: attempt === 0 && onProgress
+                        ? ({ loaded }) => onProgress(start + Math.min(loaded, blob.size), file.size)
+                        : undefined,
+                });
+                succeeded = true;
+                break;
+            } catch (error) {
+                if (isUploadAbortError(error) || isChunkSessionExpired(error)) throw error;
+                if (error instanceof ApiError && error.status !== undefined && CHUNK_PERMANENT_STATUSES.has(error.status)) throw error;
+                lastError = error;
+                if (attempt < CHUNK_ATTEMPTS_PER_CHUNK - 1) await retryDelay(attempt);
+            }
+        }
+        if (!succeeded) throw lastError;
         onProgress?.(Math.min(end, file.size), file.size);
     }
     // 合并时后端要把整份文件写入存储（对象存储为同步上传），超时按整份大小计算。
