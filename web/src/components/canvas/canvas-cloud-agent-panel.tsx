@@ -1424,8 +1424,9 @@ export const CanvasCloudAgentPanel = memo(function CanvasCloudAgentPanel() {
             const effectiveModel = options?.requiresVision ? selectImageInspectionModel(config, settings.model) : settings.model;
             if (options?.requiresVision && !effectiveModel) throw new Error("当前没有配置支持图片输入的文本模型，请在模型能力设置中为一个文本模型开启图片输入后重试");
             const pending = pendingSubmission.current;
-            // 目录已读到就以技能库为准，防止刷新与发送之间带出失效 ID。
-            const usableSkillIds = skillCatalogReady ? reconcileSkillSelection(settings.skillIds, installedSkills).skillIds : settings.skillIds;
+            // 目录未读完时不能把会话里保存的 skillIds 原样发出：用户可能已经删除了其中某个技能，
+            // 服务端会以「只能固定已安装且启用的技能」拒绝整条消息。此时宁可不固定，也不带未校验 ID。
+            const usableSkillIds = skillCatalogReady ? reconcileSkillSelection(settings.skillIds, installedSkills).skillIds : [];
             // An ambiguous previous POST owns its body/key until reconciled.
             // Editing model settings or prompt must not silently create a new charge.
             if (pending?.request && pending.request.prompt !== value) throw new Error("上一条请求结果待确认，请先原样重试上一条消息，再发送新要求");

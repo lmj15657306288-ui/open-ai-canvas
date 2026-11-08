@@ -316,9 +316,9 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 				return err
 			}
 			profile = normalized.Image
-			if profile.Parameters == nil {
-				fillMissingImageSizePresets(profile, taskInput.Config.InterfaceType)
-			}
+			// 声明式线路同样可能在保存时丢掉换算表（size 参数是 pixels 且带枚举值），
+			// 补齐不能只看 Parameters 是否为空，否则这类线路每次生成都失败关闭。
+			fillMissingImageSizePresets(profile, taskInput.Config.InterfaceType)
 			if presetErr := imageSizePresetReadyError(profile, taskInput.Config.InterfaceType); presetErr != nil {
 				return presetErr
 			}
@@ -357,9 +357,7 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 		}
 		imageProfile = applyModelSpecificImageCapability(imageProfile, string(item.Protocol), firstNonEmpty(item.ProviderModelKey, item.ModelKey), taskInput.Config.APIFormat)
 		// 旧线路没有换算表时按声明的档位补齐；补不齐就失败关闭，不能静默按 1K 出图。
-		if imageProfile.Parameters == nil {
-			fillMissingImageSizePresets(imageProfile, string(item.Protocol))
-		}
+		fillMissingImageSizePresets(imageProfile, string(item.Protocol))
 		if presetErr := imageSizePresetReadyError(imageProfile, string(item.Protocol)); presetErr != nil {
 			return presetErr
 		}
@@ -725,13 +723,20 @@ func declaredImageResolutionTier(value string) string {
 // Ordinary image quality never selects a pixel preset.
 func imagePresetSelectionTier(profile *ImageCapabilityConfig, value string) string {
 	if profile.Parameters != nil {
-		if profile.Resolution.Supported && containsCapabilityString(profile.Resolution.Values, value) {
-			return value
-		}
-		if !profile.Resolution.Supported {
-			if tier, ok := singleImageSizeTier(profile); ok {
-				return tier
+		if profile.Resolution.Supported {
+			if containsCapabilityString(profile.Resolution.Values, value) {
+				return value
 			}
+			return ""
+		}
+		// 声明式线路可能没有独立的 imageResolution 参数，用 quality 的语义档位
+		// （low / medium / high）选择像素预设。档位来源必须与 imageSizeDeclaredTiers
+		// 一致，否则补出来的换算表永远查不到。
+		if tier := imageResolutionTier(value); tier != "" {
+			return tier
+		}
+		if tier, ok := singleImageSizeTier(profile); ok {
+			return tier
 		}
 		return ""
 	}
@@ -750,10 +755,35 @@ func imagePresetSelectionTier(profile *ImageCapabilityConfig, value string) stri
 }
 
 func imagePresetDefaultTier(profile *ImageCapabilityConfig) string {
+	value := profile.Quality.Default
 	if profile.Resolution.Supported {
-		return imagePresetSelectionTier(profile, profile.Resolution.Default)
+		value = profile.Resolution.Default
 	}
-	return imagePresetSelectionTier(profile, profile.Quality.Default)
+	return imagePresetSelectionTier(profile, value)
+}
+
+// lowestImageSizeTier 取换算表里最低的分辨率档位，用作无法解析默认档时的兜底。
+func lowestImageSizeTier(presets []ImageSizePreset) string {
+	order := func(tier string) int {
+		switch tier {
+		case "1k":
+			return 0
+		case "1.5k":
+			return 1
+		case "2k":
+			return 2
+		case "4k":
+			return 3
+		}
+		return 4
+	}
+	lowest := ""
+	for _, preset := range presets {
+		if lowest == "" || order(preset.Tier) < order(lowest) {
+			lowest = preset.Tier
+		}
+	}
+	return lowest
 }
 
 // resolveImageTaskSize 把画布按比例保存的 size（如 16:9）换算成图片模型
@@ -769,7 +799,18 @@ func resolveImageTaskSize(profile *ImageCapabilityConfig, interfaceType string, 
 	if value == "" || strings.EqualFold(value, "auto") {
 		return size
 	}
-	preset, ok := declaredImageSizePreset(activeImageSizePresets(profile), value, imagePresetSelectionTier(profile, quality), imagePresetDefaultTier(profile))
+	tier := imagePresetSelectionTier(profile, quality)
+	if tier == "" && profile.Parameters != nil && strings.EqualFold(strings.TrimSpace(quality), "auto") {
+		// 声明式线路用 quality 选档位时，auto 表示“由系统决定”：按最低档出图，
+		// 不能静默升到高分辨率计费。quality 为空仍是歧义，保持失败关闭。
+		tier = lowestImageSizeTier(profile.Size.Presets)
+	}
+	presets := activeImageSizePresets(profile)
+	if len(presets) == 0 && tier != "" {
+		// 多档线路没有唯一默认档，档位一旦明确就可以在全表里按档位过滤。
+		presets = profile.Size.Presets
+	}
+	preset, ok := declaredImageSizePreset(presets, value, tier, imagePresetDefaultTier(profile))
 	if !ok {
 		return size
 	}

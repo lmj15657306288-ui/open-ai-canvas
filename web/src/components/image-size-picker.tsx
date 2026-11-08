@@ -2,7 +2,7 @@ import { useState } from "react";
 import "./image-size-picker.css";
 import { Input, Button } from "antd";
 import type { ImageCapabilityConfig } from "@/lib/model-capabilities";
-import { imageResolutionTiers, imagePresetForRatio, imagePresetValue, imageQualityForSelection, imageQualityForTier, imageResolutionUsesQuality, imageSizePresets, imageTierAvailable } from "@/lib/image-size-presets";
+import { imageResolutionTiers, imagePresetForRatio, imagePresetValue, imageQualityForSelection, imageQualityForTier, imageQualityTier, imageResolutionUsesQuality, imageSizePresets, imageTierAvailable } from "@/lib/image-size-presets";
 import { buildImageResolutionOptions, type ImageResolutionOption, type ImageResolutionTier } from "@/lib/image-resolution-tiers";
 
 import { resolveImageRequestSize, validateImageSize } from "@/services/api/image-validation";
@@ -33,7 +33,8 @@ export function ImageSizePicker({
     const [customPreset, setCustomPreset] = useState<ImageResolutionOption>();
     const [custom, setCustom] = useState("");
     const [error, setError] = useState("");
-    const qualityTier = IMAGE_RESOLUTIONS.find((value) => value === (quality || "").toLowerCase());
+    const qualityTier =
+        IMAGE_RESOLUTIONS.find((value) => value === (quality || "").toLowerCase()) || (profile.parameters ? imageQualityTier(quality || "") : undefined);
     const resolutionTier = IMAGE_RESOLUTIONS.find((value) => value === (imageResolution || "").toLowerCase());
     const selectedTier = profile.resolution.supported ? resolutionTier : qualityTier;
     const matches = (preset: ImageResolutionOption) => {
@@ -72,7 +73,7 @@ export function ImageSizePicker({
         (restoredCustom && imageTierAvailable(profile, restoredCustom.tier) ? restoredCustom : undefined);
     const available = (value: ImageResolutionTier) => imageTierAvailable(profile, value) && (profile.size.allowCustom || presets.some((preset) => preset.tier === value));
     const tier = ungrouped
-        ? (IMAGE_RESOLUTIONS[0] ?? "")
+        ? ((qualityTier && IMAGE_RESOLUTIONS.includes(qualityTier) ? qualityTier : IMAGE_RESOLUTIONS[0]) ?? "")
         : (active && visibleTiers.includes(active.tier) ? active.tier : undefined) ||
           (profile.size.parameter === "aspect_ratio" && imageResolutionUsesQuality(profile) ? visibleTiers.find((value) => imageQualityForTier(profile, value) === (quality || profile.quality.default)) : undefined) ||
           (selectedTier && visibleTiers.includes(selectedTier) ? selectedTier : undefined) ||

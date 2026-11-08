@@ -2,9 +2,26 @@ import { buildImageResolutionOptions, type ImageResolutionOption, type ImageReso
 import type { ImageCapabilityConfig } from "./model-capabilities";
 
 export const IMAGE_RESOLUTIONS: ImageResolutionTier[] = ["1k", "2k", "4k"];
+// 声明式线路没有独立 imageResolution 参数时，quality 的 low / medium / high 就是
+// 档位选择器。映射必须与后端 imageResolutionTier 一致，否则预设查不到对应像素。
+const IMAGE_TIER_ALIASES: Record<string, ImageResolutionTier> = { "1k": "1k", low: "1k", "1.5k": "1.5k", "2k": "2k", medium: "2k", "4k": "4k", high: "4k" };
+
+export function imageQualityTier(value: string): ImageResolutionTier | undefined {
+    return IMAGE_TIER_ALIASES[value.trim().toLowerCase()];
+}
+
+export function imageDeclaredTiers(profile: ImageCapabilityConfig): ImageResolutionTier[] {
+    const tiers = new Set<ImageResolutionTier>();
+    for (const value of [profile.quality.default, ...profile.quality.values]) {
+        const tier = imageQualityTier(String(value ?? ""));
+        if (tier) tiers.add(tier);
+    }
+    return [...tiers];
+}
+
 // 1.5K 只在模型明确配置此档位时出现，既有模型的档位保持原有顺序。
 export function imageResolutionTiers(profile: ImageCapabilityConfig): ImageResolutionTier[] {
-    if (profile.parameters) return profile.resolution.supported ? profile.resolution.values : [];
+    if (profile.parameters) return profile.resolution.supported ? profile.resolution.values : imageDeclaredTiers(profile);
     const declares15k = Boolean(profile.size.presets?.some((preset) => preset.tier === "1.5k") || profile.quality.values.includes("1.5k"));
     if (!declares15k) return IMAGE_RESOLUTIONS;
     // Seedream 5.0 最高 2K：声明了 1.5K 且没有 4K 档位时只提供 1K / 1.5K / 2K。
@@ -113,7 +130,10 @@ export function imageSizePresets(profile: ImageCapabilityConfig): ImageResolutio
     if (profile.size.parameter === "none") return [];
     if (profile.parameters && !profile.resolution.supported) {
         const tier = imageSingleSizeTier(profile);
-        return (profile.size.presets || []).filter((preset) => preset.tier === (tier ?? ""));
+        const presets = profile.size.presets || [];
+        // 多档线路没有唯一的默认档，返回整表由选择器按当前档位过滤；
+        // 在这里返回空集会让画幅选择退化成枚举平铺（比例和像素混排）。
+        return tier ? presets.filter((preset) => preset.tier === tier) : presets;
     }
     if (profile.size.presets) return profile.size.presets;
     if (profile.parameters) return [];

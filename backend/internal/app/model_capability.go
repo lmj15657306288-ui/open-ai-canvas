@@ -276,9 +276,8 @@ func NormalizeModelCapabilityConfigForModel(capability string, protocol string, 
 			input.Image.ResolutionUsesQuality = strings.TrimSpace(protocol) == string(model.ChannelInterfaceGeminiImage)
 		}
 		// 旧配置缺换算表时按声明的档位与比例补齐后再校验，保存即把旧线路归一化成当前形态。
-		if input.Image.Parameters == nil {
-			fillMissingImageSizePresets(input.Image, protocol)
-		}
+		// 声明式线路（size 参数 encoding=pixels）也走同一条补齐路径。
+		fillMissingImageSizePresets(input.Image, protocol)
 		value := &ModelCapabilityConfig{Version: 1, MediaTransport: transport, Image: input.Image}
 		if err := validateImageCapabilityConfig(value.Image); err != nil {
 			return nil, err

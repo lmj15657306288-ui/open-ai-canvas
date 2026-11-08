@@ -199,6 +199,8 @@ func activeImageSizePresets(image *ImageCapabilityConfig) []ImageSizePreset {
 	}
 	tier, ok := singleImageSizeTier(image)
 	if !ok {
+		// 多档且没有唯一默认档时返回空集：由调用方在“档位已明确”时直接用全表过滤。
+		// 在这里放行会让没选档位的请求静默命中第一个预设。
 		return nil
 	}
 	result := make([]ImageSizePreset, 0, len(image.Size.Presets))

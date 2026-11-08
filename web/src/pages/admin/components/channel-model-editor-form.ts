@@ -85,6 +85,13 @@ export function duplicateChannelModelValues(item: ChannelModel, protocols: Model
     };
 }
 
+// 换算表只服务「上游要像素、画布按比例提交」的线路。声明式 size 参数 encoding=pixels
+// 时，即使枚举里同时给了像素值也必须保留预设：后端要用比例 + 档位查出像素尺寸。
+// 在这里清掉，保存后的线路会在生成时被判成缺少换算表。
+function imageSizeNeedsPresets(protocol: string | undefined, protocols: ModelProtocolDefinition[]) {
+    return protocols.find((p) => p.value === protocol)?.imageParameters?.some((p) => p.name === "size" && p.encoding === "pixels") === true;
+}
+
 // Clear incompatible selectors, but never silently convert prices or billing units.
 export function changeChannelModelCapability(values: ChannelModelFormValues, protocols: ModelProtocolDefinition[]): ChannelModelFormValues {
     const capability = values.capability;
@@ -92,7 +99,7 @@ export function changeChannelModelCapability(values: ChannelModelFormValues, pro
     const capabilityConfig = capability === "audio" ? undefined : defaultModelCapabilityConfig(protocol, values.providerModelKey?.trim() || values.modelKey.trim());
     if (capabilityConfig?.image && protocols.find((p) => p.value === protocol)?.imageParameters) {
         capabilityConfig.image.parameters = [];
-        if (!capabilityConfig.image.resolution.supported || !protocols.find((p) => p.value === protocol)?.imageParameters?.some((p) => p.name === "size" && p.encoding === "pixels" && !p.values?.length)) capabilityConfig.image.size.presets = undefined;
+        if (!imageSizeNeedsPresets(protocol, protocols)) capabilityConfig.image.size.presets = undefined;
     }
     return updateChannelModelUpstreamCapabilities(
         {
@@ -120,7 +127,7 @@ export function changeChannelModelProtocol(values: ChannelModelFormValues, proto
     const capabilityConfig = values.capability === "audio" ? undefined : defaultModelCapabilityConfig(protocol, values.providerModelKey?.trim() || values.modelKey.trim());
     if (capabilityConfig?.image && protocols.find((p) => p.value === protocol)?.imageParameters) {
         capabilityConfig.image.parameters = [];
-        if (!capabilityConfig.image.resolution.supported || !protocols.find((p) => p.value === protocol)?.imageParameters?.some((p) => p.name === "size" && p.encoding === "pixels" && !p.values?.length)) capabilityConfig.image.size.presets = undefined;
+        if (!imageSizeNeedsPresets(protocol, protocols)) capabilityConfig.image.size.presets = undefined;
     }
     const next: ChannelModelFormValues = {
         ...values,
