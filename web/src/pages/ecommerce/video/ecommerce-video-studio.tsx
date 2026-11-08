@@ -11,9 +11,9 @@ import type { EcommerceWorkRemix } from "./use-ecommerce-video";
 import "./ecommerce-video.css";
 
 /**
- * 电商 Agent「商品视频」：与「商品图片」同构——左侧作品区、右侧创作面板。
- * .ecs-shell 的网格是 `minmax(0,1fr) minmax(380px,420px)`，第一列必须是作品区（.commerce-output-gallery），
- * 第二列才是 .ecs-composer；顺序写反会把参数面板撑满大区、作品栏挤成右侧窄条。
+ * 电商 Agent「商品视频」：与页面同构——左侧创作面板、右侧作品区。
+ * .ecs-shell 的网格是 `minmax(380px,420px) minmax(0,1fr)`，第一列必须是 .ecs-composer，
+ * 第二列才是作品区（.commerce-output-gallery）；顺序写反会把面板换到右边、作品挤成窄条。
  * 顶部的「商品图片 / 商品视频」切换由页面传入。
  */
 export default function EcommerceVideoStudio({ kindSwitch, hidden = false }: { kindSwitch: ReactNode; hidden?: boolean }) {
@@ -49,11 +49,11 @@ export default function EcommerceVideoStudio({ kindSwitch, hidden = false }: { k
                     ]}
                 />
             </div>
-            <EcommerceVideoResults state={state} />
             <aside className="ecs-composer" aria-label={t("ecommerceVideo.studio.composerLabel")}>
                 <header className="ecs-composer-head">{kindSwitch}</header>
                 <EcommerceVideoComposer state={state} />
             </aside>
+            <EcommerceVideoResults state={state} />
         </div>
     );
 }

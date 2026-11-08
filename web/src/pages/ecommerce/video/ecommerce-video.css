@@ -1,4 +1,4 @@
-/* 电商 Agent「商品视频」：左侧视频作品 + 右侧参数面板（复用 .ecs-composer 外壳，与「商品图片」同构）。 */
+/* 电商 Agent「商品视频」：左侧参数面板（复用 .ecs-composer 外壳）+ 右侧视频作品，与图片生成页同构。 */
 .ecs-shell {
     --ecv-good: #16a34a;
     --ecv-bad: var(--destructive, #dc2626);
@@ -871,7 +871,7 @@
     background: var(--ecv-bad, #dc2626);
 }
 
-/* ---------- 右侧视频作品 ---------- */
+/* ---------- 右侧作品区 ---------- */
 .ecv-results {
     overflow: hidden;
     border-radius: var(--r-2xl);

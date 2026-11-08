@@ -17,13 +17,13 @@
 .ecs-shell {
     --ecs-motion: var(--motion-dur-base) var(--motion-ease-out);
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(380px, 420px);
+    grid-template-columns: minmax(380px, 420px) minmax(0, 1fr);
     gap: var(--space-4);
     width: 100%;
     height: 100%;
     min-width: 0;
     min-height: 0;
-    padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+    padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
     background: var(--user-page-bg);
     color: var(--user-ink);
 }
@@ -35,7 +35,7 @@
     outline-offset: 2px;
 }
 
-/* ---------- 右侧创作面板 ---------- */
+/* ---------- 左侧创作面板 ---------- */
 .ecs-composer {
     display: flex;
     flex-direction: column;
@@ -978,7 +978,7 @@
 /* ---------- 窄屏 ---------- */
 @media (max-width: 1180px) {
     .ecs-shell {
-        grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
+        grid-template-columns: minmax(340px, 380px) minmax(0, 1fr);
         gap: var(--space-3);
     }
 }

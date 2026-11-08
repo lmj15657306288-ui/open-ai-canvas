@@ -2004,7 +2004,7 @@ function EcommerceWorkspace({ scope }: { scope: string }) {
     const nextStep = !ecommerceEnabled
         ? "电商创作暂未开放，历史方案和作品仍可查看与下载。"
         : !productReferences.length && !rememberedReferenceCount
-          ? `先在右侧添加${scene?.materials.required || "商品图"}，作品会显示在这里。`
+          ? `先在左侧添加${scene?.materials.required || "商品图"}，作品会显示在这里。`
           : commerceFlowNextStep(flowSteps);
     const roundDelivered = Boolean(plan && submitted > 0 && completed === total);
     // 商品视频交给视频生成页：带上一张已完成的作品做首帧。两个开关都开着才出现入口。
@@ -2068,7 +2068,7 @@ function EcommerceWorkspace({ scope }: { scope: string }) {
                     onRefresh={() => void requestCreativeDirections(Boolean(plan && completed === total))}
                 />
             ) : roundDelivered && directionsStatus !== "loading" ? (
-                // 一轮的终点：交付动作集中在这里，不用再去右侧或资产库找下一步。
+                // 一轮的终点：交付动作集中在这里，不用再去左侧面板或资产库找下一步。
                 <section className="commerce-delivery" aria-label="本轮交付">
                     <header>
                         <strong>本轮 {completed} 张已全部完成</strong>
@@ -2291,39 +2291,6 @@ function EcommerceWorkspace({ scope }: { scope: string }) {
                         ]}
                     />
                 </div>
-                <EcommerceOutputGallery
-                    config={config}
-                    draft={project ? projectDraft(project) : draft}
-                    plan={plan}
-                    tasks={tasks}
-                    imageModels={imageModels}
-                    qualityIssues={qualityIssues}
-                    selected={selectedExportIds}
-                    onSelect={(id) =>
-                        setSelectedExportIds((current) => {
-                            const next = new Set(current);
-                            if (next.has(id)) next.delete(id);
-                            else next.add(id);
-                            return next;
-                        })
-                    }
-                    onDownload={downloadOne}
-                    onRemove={removeResult}
-                    onRegenerate={regenerateWithPreview}
-                    onRetry={(image) => void retryImage(image)}
-                    generationPending={busy || Boolean(activeImages)}
-                    regeneratingIds={regeneratingIds}
-                    regenerationPreviews={regenerationPreviews}
-                    stage={stagePanel}
-                    stageActive={stageActive}
-                    nextStep={nextStep}
-                    exportCount={exportItems.length}
-                    exportDisabled={busy}
-                    onExport={() => runExport("zip")}
-                    preparedDownload={preparedDownload}
-                    progress={ecommerceEnabled ? <CommerceFlowSteps steps={flowSteps} /> : null}
-                    onMakeVideo={productVideoAvailable ? makeProductVideo : undefined}
-                />
                 <aside className="ecs-composer" aria-label="电商创作面板">
                     <header className="ecs-composer-head">
                         {kindSwitch}
@@ -2616,6 +2583,39 @@ function EcommerceWorkspace({ scope }: { scope: string }) {
                         </Button>
                     </footer>
                 </aside>
+                <EcommerceOutputGallery
+                    config={config}
+                    draft={project ? projectDraft(project) : draft}
+                    plan={plan}
+                    tasks={tasks}
+                    imageModels={imageModels}
+                    qualityIssues={qualityIssues}
+                    selected={selectedExportIds}
+                    onSelect={(id) =>
+                        setSelectedExportIds((current) => {
+                            const next = new Set(current);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                        })
+                    }
+                    onDownload={downloadOne}
+                    onRemove={removeResult}
+                    onRegenerate={regenerateWithPreview}
+                    onRetry={(image) => void retryImage(image)}
+                    generationPending={busy || Boolean(activeImages)}
+                    regeneratingIds={regeneratingIds}
+                    regenerationPreviews={regenerationPreviews}
+                    stage={stagePanel}
+                    stageActive={stageActive}
+                    nextStep={nextStep}
+                    exportCount={exportItems.length}
+                    exportDisabled={busy}
+                    onExport={() => runExport("zip")}
+                    preparedDownload={preparedDownload}
+                    progress={ecommerceEnabled ? <CommerceFlowSteps steps={flowSteps} /> : null}
+                    onMakeVideo={productVideoAvailable ? makeProductVideo : undefined}
+                />
             </div>
             <EcommerceProjectHistory open={historyOpen} tasks={tasks} activeProjectId={project?.id} deletionDisabled={busy || uploading || restoring} onClose={() => setHistoryOpen(false)} onOpen={openProject} onDeleted={onHistoryDeleted} />
             <CompactEcommerceHistory
