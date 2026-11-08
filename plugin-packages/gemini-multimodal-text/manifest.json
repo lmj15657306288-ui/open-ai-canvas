@@ -1,0 +1,326 @@
+{
+  "apiVersion": "yingce.plugin/v2",
+  "id": "gemini-multimodal-text",
+  "name": "Gemini 多模态视频理解",
+  "version": "1.0.0",
+  "author": "影策",
+  "description": "Google Gemini generateContent 的视频理解线协议：把整段参考视频以内联 inlineData 随文本一次提交，用于电商商品视频的整片理解。",
+  "documentation": "# Gemini 多模态视频理解\n\nGoogle Gemini `generateContent` 的视频理解线协议插件。把文本、参考图片和**整段参考视频**放在同一个请求里提交，供需要「看完整条视频」的业务使用（电商 Agent → 商品视频的分镜分析）。\n\n- 插件 ID / Provider ID：`gemini-multimodal-text`\n- 能力：`text`\n- 默认 Base URL：`https://generativelanguage.googleapis.com`\n- 鉴权：`google-api-key`（请求头 `x-goog-api-key`）\n- 创建：`POST /v1beta/models/{{model}}:generateContent`（同步）\n\n## 与 `google-gemini-generate-content` 的区别\n\n| 项 | google-gemini-generate-content | 本插件 |\n| --- | --- | --- |\n| 对话结构 | 每条消息一个 `contents` 项，`parts` 只有 `text` | 合并为单个 `user` 项，`parts` 同时承载文本与媒体 |\n| 参考图 | 不支持 | 支持（`inlineData` / `fileData`） |\n| 参考视频 | 不支持 | 支持（data URL 走 `inlineData`，公网 URL 走 `fileData`） |\n| 适用场景 | 普通文本、看图 | 整片视频理解 |\n\n## 请求映射\n\n- 用户文本取自 `request.prompt`，映射为 `contents[0].parts[0].text`；`request.instructions` 走 `systemInstruction`。\n- **不映射 `messages`**：宿主会为参考图/视频自动追加一条 OpenAI 风格消息（`content` 是 `image_url` / `video_url` 数组），按 messages 映射会把该数组塞进 `text` 字段，被上游拒绝。\n- `images` / `videos` 逐项映射为 `{\"inlineData\":{\"mimeType\":…,\"data\":…}}` 或 `{\"fileData\":{\"mimeType\":…,\"fileUri\":…}}`；视频 `mimeType` 缺省按 `video/mp4` 兜底。\n- `providerOptions.gemini-multimodal-text.generationConfig`、`safetySettings` 原样透传。\n\n## 使用前提\n\n1. 渠道用本协议建模型，模型名必须是上游支持视频输入的 Gemini 模型。\n2. 模型能力里勾选「支持视频识别」并把 `references.maxVideos` 设为 ≥1，否则宿主在预授权阶段就会拦下参考视频。\n3. 内联视频按 base64 传输，请求体受网关限制；调用方需先把视频压到预算内（商品视频分析压到 12MB 内、640 长边、15fps）。\n\n## 已知边界\n\n- 只支持单轮：所有文本合并进一个 `user` content，不做多轮 role 交替。\n- 本插件只保证线协议字段正确，不保证上游模型一定接受视频；是否真能理解视频取决于模型和网关。\n\n---\n\n# Gemini 多模态视频理解 接口字段\n\n## 协议身份\n\n- 插件 ID：`gemini-multimodal-text`。\n- Provider ID：`gemini-multimodal-text`。\n- 能力：`text`。\n- 默认 Base URL：`https://generativelanguage.googleapis.com`。\n- 鉴权驱动：`google-api-key`（请求头 `x-goog-api-key`）。\n- 创建：`POST /v1beta/models/{{model}}:generateContent`。\n- 生命周期：同步响应。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | API Key |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model`（路径参数） | 上游模型 ID，须支持视频输入。 |\n| `prompt` | string | 否 | `contents[0].parts[0].text` | 用户文本。 |\n| `instructions` | string | 否 | `systemInstruction.parts[0].text` | 系统指令。 |\n| `images` | media[] | 否 | `contents[0].parts[].inlineData` / `fileData` | data URL 走 `inlineData`，公网地址走 `fileData`。 |\n| `videos` | media[] | 否 | `contents[0].parts[].inlineData` / `fileData` | 同上；`mimeType` 缺省按 `video/mp4`。 |\n| `messages` | message[] | 否 | 未映射 | 宿主自动追加的媒体消息不参与映射。 |\n| `providerOptions` | object | 否 | `generationConfig` / `safetySettings` | 命名空间为 `gemini-multimodal-text`。 |\n| `stream` | boolean | 否 | `generationConfig.stream` | 后台任务以最终响应归一。 |\n\n## 上游请求模板逐字段清单\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n| `create.method` | `\"POST\"` |\n| `create.path` | `\"/v1beta/models/{{model}}:generateContent\"` |\n| `create.contentType` | `\"application/json\"` |\n| `create.body.contents[0].role` | `\"user\"` |\n| `create.body.contents[0].parts` | `$concatArrays[ prompt 文本, images, videos ]` |\n| `create.body.contents[0].parts[].text` | `{\"$ref\":\"request.prompt\"}`（prompt 非空时） |\n| `create.body.contents[0].parts[].inlineData` | `{\"mimeType\":{\"$dataMime\":{\"$ref\":\"media.dataUrl\"}},\"data\":{\"$dataPayload\":{\"$ref\":\"media.dataUrl\"}}}` |\n| `create.body.contents[0].parts[].fileData` | `{\"mimeType\":{\"$ref\":\"media.mimeType\"},\"fileUri\":{\"$ref\":\"media.url\"}}` |\n| `create.body.systemInstruction.parts[0].text` | `{\"$ref\":\"request.instructions\"}` |\n| `create.body.generationConfig` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.gemini-multimodal-text.generationConfig\"}}` |\n| `create.body.safetySettings` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.gemini-multimodal-text.safetySettings\"}}` |\n\n## Provider 扩展键\n\n- `providerOptions.gemini-multimodal-text.generationConfig`\n- `providerOptions.gemini-multimodal-text.safetySettings`\n- `providerOptions.gemini-multimodal-text.stream`\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.status` | `\"succeeded\"` |\n| `response.text` | `{\"$map\":{\"from\":{\"$ref\":\"response.candidates.0.content.parts\"},\"as\":\"part\",\"in\":{\"$omitEmpty\":{\"$ref\":\"part.text\"}}}}` |\n| `response.usage` | `{\"$ref\":\"response.usageMetadata\"}` |\n| `response.errorPaths[0]` | `\"error.code\"` |\n| `response.messagePaths[0]` | `\"error.message\"` |\n\n## 兼容边界\n\n- 只代表 Google Generative Language `generateContent` 单一 profile；同一品牌的其他 endpoint、Vertex 区域端点或网关包装必须使用独立插件，不能按模型名猜测。\n- 单轮请求：文本只有 `request.prompt`，不做多轮 role 交替。\n- 内联视频按 base64 传输，请求体大小受网关限制，调用方需先把视频压到预算内（商品视频分析：12MB 内、640 长边、15fps）。\n\n<!-- YINGCE_MANIFEST_CONTRACT_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"yingce.plugin/v2\",\n  \"id\": \"gemini-multimodal-text\",\n  \"name\": \"Gemini 多模态视频理解\",\n  \"version\": \"1.0.0\",\n  \"author\": \"影策\",\n  \"description\": \"Google Gemini generateContent 的视频理解线协议：把整段参考视频以内联 inlineData 随文本一次提交，用于电商商品视频的整片理解。\",\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"gemini-multimodal-text\",\n        \"label\": \"Gemini 多模态视频理解\",\n        \"capabilities\": [\n          \"text\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://generativelanguage.googleapis.com\",\n        \"requiresPublicMediaUrls\": false,\n        \"auth\": {\n          \"type\": \"google-api-key\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"上游模型 ID，必须是支持视频输入的 Gemini 模型。\"\n          },\n          {\n            \"name\": \"messages\",\n            \"type\": \"message[]\",\n            \"required\": true,\n            \"mapping\": \"未使用（宿主自动追加的媒体消息不参与映射）\",\n            \"description\": \"宿主生成的对话消息；本协议不映射，用户文本请放在 prompt。\"\n          },\n          {\n            \"name\": \"instructions\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"systemInstruction.parts[0].text\",\n            \"description\": \"系统指令。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"contents[0].parts[].inlineData|fileData\",\n            \"description\": \"参考图片，data URL 走 inlineData，公网地址走 fileData。\"\n          },\n          {\n            \"name\": \"videos\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"contents[0].parts[].inlineData|fileData\",\n            \"description\": \"参考视频，data URL 走 inlineData，公网地址走 fileData。\"\n          },\n          {\n            \"name\": \"temperature\",\n            \"type\": \"number\",\n            \"required\": false,\n            \"mapping\": \"providerOptions.gemini-multimodal-text.generationConfig.temperature\",\n            \"description\": \"采样温度。\"\n          },\n          {\n            \"name\": \"top_p\",\n            \"type\": \"number\",\n            \"required\": false,\n            \"mapping\": \"providerOptions.gemini-multimodal-text.generationConfig.topP\",\n            \"description\": \"核采样参数。\"\n          },\n          {\n            \"name\": \"max_tokens\",\n            \"type\": \"integer\",\n            \"required\": false,\n            \"mapping\": \"providerOptions.gemini-multimodal-text.generationConfig.maxOutputTokens\",\n            \"description\": \"最大输出 token。\"\n          },\n          {\n            \"name\": \"response_format\",\n            \"type\": \"object\",\n            \"required\": false,\n            \"mapping\": \"providerOptions.gemini-multimodal-text.generationConfig.responseMimeType|responseSchema\",\n            \"description\": \"结构化输出配置。\"\n          },\n          {\n            \"name\": \"stream\",\n            \"type\": \"boolean\",\n            \"required\": false,\n            \"mapping\": \"generationConfig.stream\",\n            \"description\": \"流式开关；后台任务以最终响应归一。\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/v1beta/models/{{model}}:generateContent\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"contents\": [\n              {\n                \"role\": \"user\",\n                \"parts\": {\n                  \"$concatArrays\": [\n                    {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"request.prompt\"\n                        },\n                        \"then\": [\n                          {\n                            \"text\": {\n                              \"$ref\": \"request.prompt\"\n                            }\n                          }\n                        ],\n                        \"else\": []\n                      }\n                    },\n                    {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$or\": [\n                            {\n                              \"$gt\": [\n                                {\n                                  \"$len\": {\n                                    \"$ref\": \"request.images\"\n                                  }\n                                },\n                                0\n                              ]\n                            },\n                            {\n                              \"$gt\": [\n                                {\n                                  \"$len\": {\n                                    \"$ref\": \"request.videos\"\n                                  }\n                                },\n                                0\n                              ]\n                            }\n                          ]\n                        },\n                        \"then\": {\n                          \"$concatArrays\": [\n                            {\n                              \"$map\": {\n                                \"from\": {\n                                  \"$ref\": \"request.images\"\n                                },\n                                \"as\": \"media\",\n                                \"in\": {\n                                  \"$if\": {\n                                    \"condition\": {\n                                      \"$ref\": \"media.dataUrl\"\n                                    },\n                                    \"then\": {\n                                      \"inlineData\": {\n                                        \"mimeType\": {\n                                          \"$dataMime\": {\n                                            \"$ref\": \"media.dataUrl\"\n                                          }\n                                        },\n                                        \"data\": {\n                                          \"$dataPayload\": {\n                                            \"$ref\": \"media.dataUrl\"\n                                          }\n                                        }\n                                      }\n                                    },\n                                    \"else\": {\n                                      \"fileData\": {\n                                        \"mimeType\": {\n                                          \"$coalesce\": [\n                                            {\n                                              \"$ref\": \"media.mimeType\"\n                                            },\n                                            \"image/jpeg\"\n                                          ]\n                                        },\n                                        \"fileUri\": {\n                                          \"$ref\": \"media.url\"\n                                        }\n                                      }\n                                    }\n                                  }\n                                }\n                              }\n                            },\n                            {\n                              \"$map\": {\n                                \"from\": {\n                                  \"$ref\": \"request.videos\"\n                                },\n                                \"as\": \"media\",\n                                \"in\": {\n                                  \"$if\": {\n                                    \"condition\": {\n                                      \"$ref\": \"media.dataUrl\"\n                                    },\n                                    \"then\": {\n                                      \"inlineData\": {\n                                        \"mimeType\": {\n                                          \"$coalesce\": [\n                                            {\n                                              \"$ref\": \"media.mimeType\"\n                                            },\n                                            \"video/mp4\"\n                                          ]\n                                        },\n                                        \"data\": {\n                                          \"$dataPayload\": {\n                                            \"$ref\": \"media.dataUrl\"\n                                          }\n                                        }\n                                      }\n                                    },\n                                    \"else\": {\n                                      \"fileData\": {\n                                        \"mimeType\": {\n                                          \"$coalesce\": [\n                                            {\n                                              \"$ref\": \"media.mimeType\"\n                                            },\n                                            \"video/mp4\"\n                                          ]\n                                        },\n                                        \"fileUri\": {\n                                          \"$ref\": \"media.url\"\n                                        }\n                                      }\n                                    }\n                                  }\n                                }\n                              }\n                            }\n                          ]\n                        },\n                        \"else\": []\n                      }\n                    }\n                  ]\n                }\n              }\n            ],\n            \"systemInstruction\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"request.instructions\"\n                },\n                \"then\": {\n                  \"parts\": [\n                    {\n                      \"text\": {\n                        \"$ref\": \"request.instructions\"\n                      }\n                    }\n                  ]\n                },\n                \"else\": null\n              }\n            },\n            \"generationConfig\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"request.providerOptions.gemini-multimodal-text.generationConfig\"\n              }\n            },\n            \"safetySettings\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"request.providerOptions.gemini-multimodal-text.safetySettings\"\n              }\n            }\n          }\n        },\n        \"response\": {\n          \"status\": \"succeeded\",\n          \"text\": {\n            \"$map\": {\n              \"from\": {\n                \"$ref\": \"response.candidates.0.content.parts\"\n              },\n              \"as\": \"part\",\n              \"in\": {\n                \"$omitEmpty\": {\n                  \"$ref\": \"part.text\"\n                }\n              }\n            }\n          },\n          \"usage\": {\n            \"$ref\": \"response.usageMetadata\"\n          },\n          \"errorPaths\": [\n            \"error.code\"\n          ],\n          \"messagePaths\": [\n            \"error.message\"\n          ]\n        }\n      }\n    ]\n  }\n}\n```\n<!-- YINGCE_MANIFEST_CONTRACT_END -->\n",
+  "permissions": [
+    "generation.run",
+    "media.read"
+  ],
+  "configuration": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "type": "secret",
+        "label": "API Key",
+        "required": true
+      }
+    ]
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "gemini-multimodal-text",
+        "label": "Gemini 多模态视频理解",
+        "capabilities": [
+          "text"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "user.custom-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "https://generativelanguage.googleapis.com",
+        "requiresPublicMediaUrls": false,
+        "auth": {
+          "type": "google-api-key",
+          "field": "apiKey"
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "type": "string",
+            "required": true,
+            "mapping": "model",
+            "description": "上游模型 ID，必须是支持视频输入的 Gemini 模型。"
+          },
+          {
+            "name": "messages",
+            "type": "message[]",
+            "required": true,
+            "mapping": "未使用（宿主自动追加的媒体消息不参与映射）",
+            "description": "宿主生成的对话消息；本协议不映射，用户文本请放在 prompt。"
+          },
+          {
+            "name": "instructions",
+            "type": "string",
+            "required": false,
+            "mapping": "systemInstruction.parts[0].text",
+            "description": "系统指令。"
+          },
+          {
+            "name": "images",
+            "type": "media[]",
+            "required": false,
+            "mapping": "contents[0].parts[].inlineData|fileData",
+            "description": "参考图片，data URL 走 inlineData，公网地址走 fileData。"
+          },
+          {
+            "name": "videos",
+            "type": "media[]",
+            "required": false,
+            "mapping": "contents[0].parts[].inlineData|fileData",
+            "description": "参考视频，data URL 走 inlineData，公网地址走 fileData。"
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "required": false,
+            "mapping": "providerOptions.gemini-multimodal-text.generationConfig.temperature",
+            "description": "采样温度。"
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "required": false,
+            "mapping": "providerOptions.gemini-multimodal-text.generationConfig.topP",
+            "description": "核采样参数。"
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "required": false,
+            "mapping": "providerOptions.gemini-multimodal-text.generationConfig.maxOutputTokens",
+            "description": "最大输出 token。"
+          },
+          {
+            "name": "response_format",
+            "type": "object",
+            "required": false,
+            "mapping": "providerOptions.gemini-multimodal-text.generationConfig.responseMimeType|responseSchema",
+            "description": "结构化输出配置。"
+          },
+          {
+            "name": "stream",
+            "type": "boolean",
+            "required": false,
+            "mapping": "generationConfig.stream",
+            "description": "流式开关；后台任务以最终响应归一。"
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/v1beta/models/{{model}}:generateContent",
+          "contentType": "application/json",
+          "body": {
+            "contents": [
+              {
+                "role": "user",
+                "parts": {
+                  "$concatArrays": [
+                    {
+                      "$if": {
+                        "condition": {
+                          "$ref": "request.prompt"
+                        },
+                        "then": [
+                          {
+                            "text": {
+                              "$ref": "request.prompt"
+                            }
+                          }
+                        ],
+                        "else": []
+                      }
+                    },
+                    {
+                      "$if": {
+                        "condition": {
+                          "$or": [
+                            {
+                              "$gt": [
+                                {
+                                  "$len": {
+                                    "$ref": "request.images"
+                                  }
+                                },
+                                0
+                              ]
+                            },
+                            {
+                              "$gt": [
+                                {
+                                  "$len": {
+                                    "$ref": "request.videos"
+                                  }
+                                },
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        "then": {
+                          "$concatArrays": [
+                            {
+                              "$map": {
+                                "from": {
+                                  "$ref": "request.images"
+                                },
+                                "as": "media",
+                                "in": {
+                                  "$if": {
+                                    "condition": {
+                                      "$ref": "media.dataUrl"
+                                    },
+                                    "then": {
+                                      "inlineData": {
+                                        "mimeType": {
+                                          "$dataMime": {
+                                            "$ref": "media.dataUrl"
+                                          }
+                                        },
+                                        "data": {
+                                          "$dataPayload": {
+                                            "$ref": "media.dataUrl"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "else": {
+                                      "fileData": {
+                                        "mimeType": {
+                                          "$coalesce": [
+                                            {
+                                              "$ref": "media.mimeType"
+                                            },
+                                            "image/jpeg"
+                                          ]
+                                        },
+                                        "fileUri": {
+                                          "$ref": "media.url"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "$map": {
+                                "from": {
+                                  "$ref": "request.videos"
+                                },
+                                "as": "media",
+                                "in": {
+                                  "$if": {
+                                    "condition": {
+                                      "$ref": "media.dataUrl"
+                                    },
+                                    "then": {
+                                      "inlineData": {
+                                        "mimeType": {
+                                          "$coalesce": [
+                                            {
+                                              "$ref": "media.mimeType"
+                                            },
+                                            "video/mp4"
+                                          ]
+                                        },
+                                        "data": {
+                                          "$dataPayload": {
+                                            "$ref": "media.dataUrl"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "else": {
+                                      "fileData": {
+                                        "mimeType": {
+                                          "$coalesce": [
+                                            {
+                                              "$ref": "media.mimeType"
+                                            },
+                                            "video/mp4"
+                                          ]
+                                        },
+                                        "fileUri": {
+                                          "$ref": "media.url"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "else": []
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "systemInstruction": {
+              "$if": {
+                "condition": {
+                  "$ref": "request.instructions"
+                },
+                "then": {
+                  "parts": [
+                    {
+                      "text": {
+                        "$ref": "request.instructions"
+                      }
+                    }
+                  ]
+                },
+                "else": null
+              }
+            },
+            "generationConfig": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.gemini-multimodal-text.generationConfig"
+              }
+            },
+            "safetySettings": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.gemini-multimodal-text.safetySettings"
+              }
+            }
+          }
+        },
+        "response": {
+          "status": "succeeded",
+          "text": {
+            "$map": {
+              "from": {
+                "$ref": "response.candidates.0.content.parts"
+              },
+              "as": "part",
+              "in": {
+                "$omitEmpty": {
+                  "$ref": "part.text"
+                }
+              }
+            }
+          },
+          "usage": {
+            "$ref": "response.usageMetadata"
+          },
+          "errorPaths": [
+            "error.code"
+          ],
+          "messagePaths": [
+            "error.message"
+          ]
+        }
+      }
+    ]
+  }
+}
