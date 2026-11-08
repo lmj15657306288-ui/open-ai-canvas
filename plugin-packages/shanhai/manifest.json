@@ -1,0 +1,449 @@
+{
+  "apiVersion": "yingce.plugin/v2",
+  "id": "shanhai",
+  "name": "山海 Open Canvas API",
+  "version": "1.0.0",
+  "author": "山海 / 影策",
+  "description": "接入 shanhai.vnshu.cn 的 Open Canvas 公开 API。图片通常同步返回，视频异步返回任务 ID 后轮询。",
+  "permissions": [
+    "generation.run",
+    "media.read"
+  ],
+  "configuration": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "type": "secret",
+        "label": "API Key",
+        "required": true
+      }
+    ]
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "shanhai-image",
+        "label": "山海 · 图片",
+        "capabilities": [
+          "image"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "user.custom-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "https://shanhai.vnshu.cn/api/v1",
+        "requiresPublicMediaUrls": true,
+        "auth": {
+          "type": "bearer",
+          "field": "apiKey"
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "type": "string",
+            "required": true,
+            "mapping": "model",
+            "description": "GET /models 返回的稳定模型 ID，例如 shanhai-image-2。"
+          },
+          {
+            "name": "prompt",
+            "type": "string",
+            "required": true,
+            "mapping": "prompt",
+            "description": "图片提示词。"
+          },
+          {
+            "name": "images",
+            "type": "media[]",
+            "required": false,
+            "mapping": "inputs[]",
+            "description": "参考图或编辑源图，需要公网可访问的 HTTPS 地址。"
+          },
+          {
+            "name": "aspectRatio",
+            "type": "string",
+            "required": false,
+            "mapping": "options.aspect_ratio",
+            "description": "画幅比例。"
+          },
+          {
+            "name": "resolution",
+            "type": "string",
+            "required": false,
+            "mapping": "options.resolution",
+            "description": "分辨率档位，1K / 2K / 4K。"
+          }
+        ],
+        "imageParameters": [
+          {
+            "name": "size",
+            "label": "画幅比例",
+            "type": "string",
+            "binding": "aspectRatio",
+            "values": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4"
+            ],
+            "default": "1:1"
+          },
+          {
+            "name": "imageResolution",
+            "label": "分辨率",
+            "type": "string",
+            "binding": "resolution",
+            "values": [
+              "1K",
+              "2K",
+              "4K"
+            ],
+            "default": "1K",
+            "pricing": true
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/generations",
+          "contentType": "application/json",
+          "body": {
+            "model": {
+              "$ref": "request.model"
+            },
+            "prompt": {
+              "$ref": "request.prompt"
+            },
+            "media_type": "image",
+            "scene": {
+              "$if": {
+                "condition": {
+                  "$gt": [
+                    {
+                      "$len": {
+                        "$ref": "request.images"
+                      }
+                    },
+                    0
+                  ]
+                },
+                "then": "image-to-image",
+                "else": "text-to-image"
+              }
+            },
+            "inputs": {
+              "$omitEmpty": {
+                "$map": {
+                  "from": {
+                    "$ref": "request.images"
+                  },
+                  "as": "media",
+                  "in": {
+                    "type": "image",
+                    "url": {
+                      "$coalesce": [
+                        {
+                          "$ref": "media.url"
+                        },
+                        {
+                          "$ref": "media.dataUrl"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "options": {
+              "aspect_ratio": {
+                "$omitEmpty": {
+                  "$ref": "request.aspectRatio"
+                }
+              },
+              "resolution": {
+                "$omitEmpty": {
+                  "$ref": "request.resolution"
+                }
+              }
+            }
+          }
+        },
+        "poll": {
+          "method": "GET",
+          "path": "/tasks/{{taskId}}"
+        },
+        "response": {
+          "taskId": {
+            "$coalesce": [
+              {
+                "$ref": "response.id"
+              },
+              {
+                "$ref": "taskId"
+              }
+            ]
+          },
+          "status": {
+            "$coalesce": [
+              {
+                "$ref": "response.status"
+              },
+              "pending"
+            ]
+          },
+          "message": {
+            "$coalesce": [
+              {
+                "$ref": "response.error.message"
+              },
+              {
+                "$ref": "response.message"
+              },
+              {
+                "$ref": "response.error"
+              }
+            ]
+          },
+          "images": {
+            "$ref": "response.output.url"
+          },
+          "errorPaths": [
+            "error"
+          ],
+          "resultEphemeral": true
+        }
+      },
+      {
+        "id": "shanhai-video",
+        "label": "山海 · 视频",
+        "capabilities": [
+          "video"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "user.custom-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "https://shanhai.vnshu.cn/api/v1",
+        "requiresPublicMediaUrls": true,
+        "auth": {
+          "type": "bearer",
+          "field": "apiKey"
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "type": "string",
+            "required": true,
+            "mapping": "model",
+            "description": "GET /models 返回的稳定模型 ID，例如 oc-model-ggj8sz。"
+          },
+          {
+            "name": "prompt",
+            "type": "string",
+            "required": true,
+            "mapping": "prompt",
+            "description": "视频提示词。"
+          },
+          {
+            "name": "images",
+            "type": "media[]",
+            "required": false,
+            "mapping": "inputs[] type=image",
+            "description": "首帧或参考图，需要公网可访问的 HTTPS 地址。"
+          },
+          {
+            "name": "videos",
+            "type": "media[]",
+            "required": false,
+            "mapping": "inputs[] type=video",
+            "description": "参考视频，需要公网可访问的 HTTPS 地址。"
+          },
+          {
+            "name": "duration",
+            "type": "integer",
+            "required": false,
+            "mapping": "options.duration",
+            "description": "时长秒数，取值见 GET /models 的 capabilities.durations。"
+          },
+          {
+            "name": "aspectRatio",
+            "type": "string",
+            "required": false,
+            "mapping": "options.aspect_ratio",
+            "description": "画幅比例。"
+          },
+          {
+            "name": "resolution",
+            "type": "string",
+            "required": false,
+            "mapping": "options.resolution",
+            "description": "分辨率档位。"
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/generations",
+          "contentType": "application/json",
+          "body": {
+            "model": {
+              "$ref": "request.model"
+            },
+            "prompt": {
+              "$ref": "request.prompt"
+            },
+            "media_type": "video",
+            "scene": {
+              "$if": {
+                "condition": {
+                  "$gt": [
+                    {
+                      "$len": {
+                        "$ref": "request.videos"
+                      }
+                    },
+                    0
+                  ]
+                },
+                "then": "video-to-video",
+                "else": {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        0
+                      ]
+                    },
+                    "then": "image-to-video",
+                    "else": "text-to-video"
+                  }
+                }
+              }
+            },
+            "inputs": {
+              "$omitEmpty": {
+                "$concatArrays": [
+                  {
+                    "$map": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "image",
+                        "url": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.url"
+                            },
+                            {
+                              "$ref": "media.dataUrl"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$map": {
+                      "from": {
+                        "$ref": "request.videos"
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "video",
+                        "url": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.url"
+                            },
+                            {
+                              "$ref": "media.dataUrl"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "options": {
+              "aspect_ratio": {
+                "$omitEmpty": {
+                  "$ref": "request.aspectRatio"
+                }
+              },
+              "resolution": {
+                "$omitEmpty": {
+                  "$ref": "request.resolution"
+                }
+              },
+              "duration": {
+                "$omitEmpty": {
+                  "$toString": {
+                    "$ref": "request.duration"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "poll": {
+          "method": "GET",
+          "path": "/tasks/{{taskId}}"
+        },
+        "response": {
+          "taskId": {
+            "$coalesce": [
+              {
+                "$ref": "response.id"
+              },
+              {
+                "$ref": "taskId"
+              }
+            ]
+          },
+          "status": {
+            "$coalesce": [
+              {
+                "$ref": "response.status"
+              },
+              "pending"
+            ]
+          },
+          "message": {
+            "$coalesce": [
+              {
+                "$ref": "response.error.message"
+              },
+              {
+                "$ref": "response.message"
+              },
+              {
+                "$ref": "response.error"
+              }
+            ]
+          },
+          "videos": {
+            "$ref": "response.output.url"
+          },
+          "errorPaths": [
+            "error"
+          ],
+          "resultEphemeral": true
+        }
+      }
+    ]
+  },
+  "documentation": "# 山海 Open Canvas API\n\n接入 [山海](https://shanhai.vnshu.cn) 提供的 Open Canvas 公开 API。该上游不是 OpenAI 兼容接口，而是「创建生成任务 → 查询任务 → 下载产物」的异步模型，本插件用声明式线协议把两种形态映射到画布统一的图片 / 视频能力上。\n\n- 插件 ID：`shanhai`\n- Provider ID：`shanhai-image`（能力 `image`）、`shanhai-video`（能力 `video`）\n- 默认 Base URL：`https://shanhai.vnshu.cn/api/v1`\n- 鉴权：`bearer`（请求头 `Authorization: Bearer <apiKey>`）\n- 创建：`POST /generations`\n- 轮询：`GET /tasks/{{taskId}}`\n\n## 上游接口形态\n\n| 动作 | 请求 | 返回 |\n| --- | --- | --- |\n| 列出模型 | `GET /models` | 动态目录，含 `type`（text / image / video）与 `capabilities` |\n| 创建生成 | `POST /generations` | 图片多为 **200 + `status: succeeded`**（实测 20~28 秒）；视频为 **202 + `status: running`** |\n| 查询任务 | `GET /tasks/{taskId}` | 同结构，`status` 为 `queued / running / succeeded / failed` |\n| 下载产物 | `GET /media/{path}` | 响应里的 `output.url` 自带 `download_token`，有效期约 24 小时 |\n\n成功的响应形如：\n\n```json\n{\n  \"id\": \"aa40a7e3-…\",\n  \"status\": \"succeeded\",\n  \"model\": \"oc-model-16thqw\",\n  \"output\": { \"url\": \"https://shanhai.vnshu.cn/api/v1/media/runs/…?download_token=…\", \"mime_type\": \"image/png\", \"type\": \"image\" },\n  \"error\": null,\n  \"usage\": { \"credits\": 0.13 }\n}\n```\n\n## 请求结构\n\n```json\n{\n  \"model\": \"shanhai-image-2\",\n  \"prompt\": \"a single red apple on a white table, product photo\",\n  \"media_type\": \"image\",\n  \"scene\": \"text-to-image\",\n  \"inputs\": [{ \"type\": \"image\", \"url\": \"https://…/ref.jpg\" }],\n  \"options\": { \"aspect_ratio\": \"1:1\", \"resolution\": \"1K\" }\n}\n```\n\n`scene` 由插件按输入自动判定：无参考图 `text-to-image` / `text-to-video`，有图 `image-to-image` / `image-to-video`，有参考视频 `video-to-video`。\n\n## 使用前提\n\n1. 参考图、参考视频必须是**公网可直接抓取的 HTTPS 地址**，上游不接受 HTML 页面地址，也不接受 `data:` URL。插件已声明 `requiresPublicMediaUrls: true`，宿主会先把本地素材转成公网地址再提交。\n2. 模型 ID 必须取 `GET /models` 返回的 `data[].id`（例如 `shanhai-image-2`、`oc-model-ggj8sz`），`display_name` 只是展示名。\n3. 时长的合法取值以该模型 `capabilities.durations` 为准；分辨率和比例同理，传不支持的档位会被上游拒绝。\n4. 上游网关（Tengine）对 **POST /generations 有 30 秒等待上限**。慢模型（如标注「开代理使用」的 `oc-model-1atf67`）会直接 504，此时任务可能在服务端已创建但拿不到任务 ID。接入时优先选实测能同步返回的模型。\n\n---\n\n# 山海 Open Canvas API 接口字段\n\n## 协议身份\n\n- 插件 ID：`shanhai`。\n- Provider ID：`shanhai-image`（能力 `image`）、`shanhai-video`（能力 `video`）。\n- 默认 Base URL：`https://shanhai.vnshu.cn/api/v1`。\n- 鉴权驱动：`bearer`（`Authorization: Bearer <apiKey>`）。\n- 创建：`POST /generations`。\n- 轮询：`GET /tasks/{{taskId}}`。\n- 生命周期：图片以同步为主（200 + 终态），视频异步（202 + `running`，实测 15 秒成片约 3.5 分钟）。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | 山海 API Key，形如 `oc_live_…` |\n\n## 统一字段映射\n\n### 图片（`shanhai-image`）\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | `GET /models` 的 `data[].id` |\n| `prompt` | string | 是 | `prompt` | 上限 20000 字符 |\n| `images` | media[] | 否 | `inputs[]`（`type: image`） | 参考图或编辑源图 |\n| `aspectRatio` | string | 否 | `options.aspect_ratio` | `1:1` / `16:9` / `9:16` / `4:3` / `3:4` |\n| `resolution` | string | 否 | `options.resolution` | `1K` / `2K` / `4K` |\n\n### 视频（`shanhai-video`）\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | `GET /models` 的 `data[].id` |\n| `prompt` | string | 是 | `prompt` | 上限 20000 字符 |\n| `images` | media[] | 否 | `inputs[]`（`type: image`） | 首帧或参考图 |\n| `videos` | media[] | 否 | `inputs[]`（`type: video`） | 参考视频 |\n| `duration` | integer | 否 | `options.duration` | 上游要求字符串，插件用 `$toString` 转换 |\n| `aspectRatio` | string | 否 | `options.aspect_ratio` | 按模型 `capabilities.aspect_ratios` |\n| `resolution` | string | 否 | `options.resolution` | 目前视频模型均为 `720p` |\n\n## 上游特有字段\n\n| 字段 | 取值 | 来源 |\n| --- | --- | --- |\n| `media_type` | 固定 `image` / `video` | 由 Provider 决定，不对外暴露 |\n| `scene` | `text-to-text`、`text-to-image`、`image-to-image`、`text-to-video`、`image-to-video`、`video-to-video`、`image-to-text` | 插件按输入自动判定 |\n| `inputs[].type` | `image` / `video` / `audio` | 按媒体类型 |\n| `inputs[].url` | 公网 HTTPS 直链 | 宿主转存后的地址 |\n\n## 媒体约束\n\n- 单次最多 10 个参考输入（`inputs.maxItems: 10`）。\n- 所有输入 URL 必须是上游服务器能直接抓取的 HTTPS 直链；HTML 页面地址与 `data:` URL 都会被拒绝。\n- 插件声明 `requiresPublicMediaUrls: true`，宿主在提交前把本地素材转成公网地址。\n\n## 响应映射\n\n| 统一字段 | 上游路径 | 说明 |\n| --- | --- | --- |\n| 任务 ID | `response.id` → `taskId` | 图片与视频都有 `id` |\n| 状态 | `response.status`，缺省 `pending` | `queued/pending`→排队，`running`→生成中，`succeeded`→成功，`failed`→失败 |\n| 图片结果 | `response.output.url` | 图片单值，宿主按单条媒体处理 |\n| 视频结果 | `response.output.url` | 同上 |\n| 失败原因 | `response.error.message` / `response.message` / `response.error` | 依次取第一个非空值 |\n| 错误判定 | `errorPaths: [\"error\"]` | 成功时上游返回 `error: null`，不会误判为失败 |\n\n产物地址形如 `https://shanhai.vnshu.cn/api/v1/media/runs/<taskId>?download_token=…`，令牌有效期约 24 小时，因此结果标记为 `resultEphemeral`，宿主会及时落库到自有存储。\n\n## 已知限制\n\n1. 上游网关（Tengine）对 `POST /generations` 的等待上限约 30 秒。慢模型会返回 504，且此时无法拿到任务 ID，任务在服务端可能已计费。接入时优先选实测能同步返回的模型（如 `shanhai-image-2`、`oc-model-16thqw`）。\n2. `GET /models` 的目录是动态的：模型上下架会直接改变可用列表，不要硬编码模型名。\n3. 部分模型标注「开代理使用」「测试中」，稳定性和耗时差异较大，建议仅启用已验证的模型。\n\n<!-- YINGCE_MANIFEST_CONTRACT_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"yingce.plugin/v2\",\n  \"id\": \"shanhai\",\n  \"name\": \"山海 Open Canvas API\",\n  \"version\": \"1.0.0\",\n  \"author\": \"山海 / 影策\",\n  \"description\": \"接入 shanhai.vnshu.cn 的 Open Canvas 公开 API。图片通常同步返回，视频异步返回任务 ID 后轮询。\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"shanhai-image\",\n        \"label\": \"山海 · 图片\",\n        \"capabilities\": [\n          \"image\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://shanhai.vnshu.cn/api/v1\",\n        \"requiresPublicMediaUrls\": true,\n        \"auth\": {\n          \"type\": \"bearer\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"GET /models 返回的稳定模型 ID，例如 shanhai-image-2。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"prompt\",\n            \"description\": \"图片提示词。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"inputs[]\",\n            \"description\": \"参考图或编辑源图，需要公网可访问的 HTTPS 地址。\"\n          },\n          {\n            \"name\": \"aspectRatio\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"options.aspect_ratio\",\n            \"description\": \"画幅比例。\"\n          },\n          {\n            \"name\": \"resolution\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"options.resolution\",\n            \"description\": \"分辨率档位，1K / 2K / 4K。\"\n          }\n        ],\n        \"imageParameters\": [\n          {\n            \"name\": \"size\",\n            \"label\": \"画幅比例\",\n            \"type\": \"string\",\n            \"binding\": \"aspectRatio\",\n            \"values\": [\n              \"1:1\",\n              \"16:9\",\n              \"9:16\",\n              \"4:3\",\n              \"3:4\"\n            ],\n            \"default\": \"1:1\"\n          },\n          {\n            \"name\": \"imageResolution\",\n            \"label\": \"分辨率\",\n            \"type\": \"string\",\n            \"binding\": \"resolution\",\n            \"values\": [\n              \"1K\",\n              \"2K\",\n              \"4K\"\n            ],\n            \"default\": \"1K\",\n            \"pricing\": true\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/generations\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"model\": {\n              \"$ref\": \"request.model\"\n            },\n            \"prompt\": {\n              \"$ref\": \"request.prompt\"\n            },\n            \"media_type\": \"image\",\n            \"scene\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$gt\": [\n                    {\n                      \"$len\": {\n                        \"$ref\": \"request.images\"\n                      }\n                    },\n                    0\n                  ]\n                },\n                \"then\": \"image-to-image\",\n                \"else\": \"text-to-image\"\n              }\n            },\n            \"inputs\": {\n              \"$omitEmpty\": {\n                \"$map\": {\n                  \"from\": {\n                    \"$ref\": \"request.images\"\n                  },\n                  \"as\": \"media\",\n                  \"in\": {\n                    \"type\": \"image\",\n                    \"url\": {\n                      \"$coalesce\": [\n                        {\n                          \"$ref\": \"media.url\"\n                        },\n                        {\n                          \"$ref\": \"media.dataUrl\"\n                        }\n                      ]\n                    }\n                  }\n                }\n              }\n            },\n            \"options\": {\n              \"aspect_ratio\": {\n                \"$omitEmpty\": {\n                  \"$ref\": \"request.aspectRatio\"\n                }\n              },\n              \"resolution\": {\n                \"$omitEmpty\": {\n                  \"$ref\": \"request.resolution\"\n                }\n              }\n            }\n          }\n        },\n        \"poll\": {\n          \"method\": \"GET\",\n          \"path\": \"/tasks/{{taskId}}\"\n        },\n        \"response\": {\n          \"taskId\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.id\"\n              },\n              {\n                \"$ref\": \"taskId\"\n              }\n            ]\n          },\n          \"status\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.status\"\n              },\n              \"pending\"\n            ]\n          },\n          \"message\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.error.message\"\n              },\n              {\n                \"$ref\": \"response.message\"\n              },\n              {\n                \"$ref\": \"response.error\"\n              }\n            ]\n          },\n          \"images\": {\n            \"$ref\": \"response.output.url\"\n          },\n          \"errorPaths\": [\n            \"error\"\n          ],\n          \"resultEphemeral\": true\n        }\n      },\n      {\n        \"id\": \"shanhai-video\",\n        \"label\": \"山海 · 视频\",\n        \"capabilities\": [\n          \"video\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://shanhai.vnshu.cn/api/v1\",\n        \"requiresPublicMediaUrls\": true,\n        \"auth\": {\n          \"type\": \"bearer\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"GET /models 返回的稳定模型 ID，例如 oc-model-ggj8sz。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"prompt\",\n            \"description\": \"视频提示词。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"inputs[] type=image\",\n            \"description\": \"首帧或参考图，需要公网可访问的 HTTPS 地址。\"\n          },\n          {\n            \"name\": \"videos\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"inputs[] type=video\",\n            \"description\": \"参考视频，需要公网可访问的 HTTPS 地址。\"\n          },\n          {\n            \"name\": \"duration\",\n            \"type\": \"integer\",\n            \"required\": false,\n            \"mapping\": \"options.duration\",\n            \"description\": \"时长秒数，取值见 GET /models 的 capabilities.durations。\"\n          },\n          {\n            \"name\": \"aspectRatio\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"options.aspect_ratio\",\n            \"description\": \"画幅比例。\"\n          },\n          {\n            \"name\": \"resolution\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"options.resolution\",\n            \"description\": \"分辨率档位。\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/generations\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"model\": {\n              \"$ref\": \"request.model\"\n            },\n            \"prompt\": {\n              \"$ref\": \"request.prompt\"\n            },\n            \"media_type\": \"video\",\n            \"scene\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$gt\": [\n                    {\n                      \"$len\": {\n                        \"$ref\": \"request.videos\"\n                      }\n                    },\n                    0\n                  ]\n                },\n                \"then\": \"video-to-video\",\n                \"else\": {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$gt\": [\n                        {\n                          \"$len\": {\n                            \"$ref\": \"request.images\"\n                          }\n                        },\n                        0\n                      ]\n                    },\n                    \"then\": \"image-to-video\",\n                    \"else\": \"text-to-video\"\n                  }\n                }\n              }\n            },\n            \"inputs\": {\n              \"$omitEmpty\": {\n                \"$concatArrays\": [\n                  {\n                    \"$map\": {\n                      \"from\": {\n                        \"$ref\": \"request.images\"\n                      },\n                      \"as\": \"media\",\n                      \"in\": {\n                        \"type\": \"image\",\n                        \"url\": {\n                          \"$coalesce\": [\n                            {\n                              \"$ref\": \"media.url\"\n                            },\n                            {\n                              \"$ref\": \"media.dataUrl\"\n                            }\n                          ]\n                        }\n                      }\n                    }\n                  },\n                  {\n                    \"$map\": {\n                      \"from\": {\n                        \"$ref\": \"request.videos\"\n                      },\n                      \"as\": \"media\",\n                      \"in\": {\n                        \"type\": \"video\",\n                        \"url\": {\n                          \"$coalesce\": [\n                            {\n                              \"$ref\": \"media.url\"\n                            },\n                            {\n                              \"$ref\": \"media.dataUrl\"\n                            }\n                          ]\n                        }\n                      }\n                    }\n                  }\n                ]\n              }\n            },\n            \"options\": {\n              \"aspect_ratio\": {\n                \"$omitEmpty\": {\n                  \"$ref\": \"request.aspectRatio\"\n                }\n              },\n              \"resolution\": {\n                \"$omitEmpty\": {\n                  \"$ref\": \"request.resolution\"\n                }\n              },\n              \"duration\": {\n                \"$omitEmpty\": {\n                  \"$toString\": {\n                    \"$ref\": \"request.duration\"\n                  }\n                }\n              }\n            }\n          }\n        },\n        \"poll\": {\n          \"method\": \"GET\",\n          \"path\": \"/tasks/{{taskId}}\"\n        },\n        \"response\": {\n          \"taskId\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.id\"\n              },\n              {\n                \"$ref\": \"taskId\"\n              }\n            ]\n          },\n          \"status\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.status\"\n              },\n              \"pending\"\n            ]\n          },\n          \"message\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.error.message\"\n              },\n              {\n                \"$ref\": \"response.message\"\n              },\n              {\n                \"$ref\": \"response.error\"\n              }\n            ]\n          },\n          \"videos\": {\n            \"$ref\": \"response.output.url\"\n          },\n          \"errorPaths\": [\n            \"error\"\n          ],\n          \"resultEphemeral\": true\n        }\n      }\n    ]\n  },\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\"\n}\n```\n<!-- YINGCE_MANIFEST_CONTRACT_END -->\n"
+}
