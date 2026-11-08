@@ -3,7 +3,6 @@ package app
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -90,39 +89,21 @@ func TestCloudAgentMediaToolsDeclareExclusiveModelSelection(t *testing.T) {
 		if !strings.Contains(function["description"].(string), cloudAgentModelSelectionDescription) || parameters["additionalProperties"] != false {
 			t.Fatalf("incomplete model selection schema: %#v", parameters)
 		}
-		oneOfValues, ok := parameters["oneOf"].([]any)
-		oneOf := make([]map[string]any, 0, len(oneOfValues))
-		for _, value := range oneOfValues {
-			branch, isObject := value.(map[string]any)
-			if !isObject {
-				t.Fatalf("model selection branch is not an object: %#v", value)
+		// OpenAI 兼容网关会静默丢弃带顶层组合关键字的工具（生产实测：三个媒体工具
+		// 因此在模型工具清单里整批消失），互斥只能写在字段描述里、由服务端强制。
+		for _, combinator := range []string{"oneOf", "anyOf", "allOf"} {
+			if _, ok := parameters[combinator]; ok {
+				t.Fatalf("top-level %s drops the tool on OpenAI-compatible gateways: %#v", combinator, parameters[combinator])
 			}
-			oneOf = append(oneOf, branch)
-		}
-		wantBranches := 2
-		if function["name"] == "generate_media" {
-			wantBranches = 3 // omission is resolved only from a draft or a unique catalog result
-		}
-		if !ok || len(oneOf) != wantBranches {
-			t.Fatalf("model selection must be explicit and mutually exclusive: %#v", parameters["oneOf"])
-		}
-		if got := oneOf[0]["required"]; !strings.Contains(fmt.Sprint(got), "logicalModelId") {
-			t.Fatalf("logical model branch missing: %#v", oneOf)
-		}
-		if got := oneOf[1]["required"]; !strings.Contains(fmt.Sprint(got), "channelId") || !strings.Contains(fmt.Sprint(got), "channelModelKey") {
-			t.Fatalf("channel model branch missing: %#v", oneOf)
-		}
-		if _, ok := oneOf[0]["not"]; !ok {
-			t.Fatalf("logical model branch must reject mixed channel fields: %#v", oneOf[0])
-		}
-		if _, ok := oneOf[1]["not"]; !ok {
-			t.Fatalf("channel model branch must reject logicalModelId: %#v", oneOf[1])
 		}
 		props := parameters["properties"].(map[string]any)
 		for _, field := range []string{"logicalModelId", "channelId", "channelModelKey"} {
 			property := props[field].(map[string]any)
 			if property["type"] != "string" {
 				t.Fatalf("model field contract drift: %s %#v", field, property)
+			}
+			if description, _ := property["description"].(string); !strings.Contains(description, "二选一") {
+				t.Fatalf("model field must state the exclusive rule in text: %s %#v", field, property)
 			}
 		}
 	}
@@ -173,5 +154,32 @@ func TestCloudAgentMissingModelCreatesNoDraftApprovalOrTask(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("admission failure was silently hidden")
+	}
+}
+
+// TestCloudAgentToolSchemasStayGatewayCompatible 守住一次真实事故：OpenAI 兼容网关
+// （生产是 Magpie）会静默丢弃 parameters 顶层带 oneOf/anyOf/allOf 的工具。上一版把
+// 模型选择互斥写成顶层 oneOf，三个媒体工具因此在模型工具清单里整批消失，Agent 只能
+// 回复「系统没有给我提交生图任务的工具」，用户侧表现为「没有生成权限」。
+func TestCloudAgentToolSchemasStayGatewayCompatible(t *testing.T) {
+	req := agentTestRequest()
+	req.PermissionMode = "auto"
+	tools := cloudAgentTools(req)
+	if len(tools) == 0 {
+		t.Fatal("no tools compiled")
+	}
+	for _, tool := range tools {
+		function, _ := tool["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		parameters, _ := function["parameters"].(map[string]any)
+		if parameters == nil {
+			t.Fatalf("%s has no parameter schema", name)
+		}
+		// 组合关键字只允许出现在嵌套节点（如 canvas_apply_ops 的 ops.items），顶层一律禁止。
+		for _, combinator := range []string{"oneOf", "anyOf", "allOf"} {
+			if _, ok := parameters[combinator]; ok {
+				t.Fatalf("%s declares top-level %s; OpenAI-compatible gateways drop the whole tool", name, combinator)
+			}
+		}
 	}
 }

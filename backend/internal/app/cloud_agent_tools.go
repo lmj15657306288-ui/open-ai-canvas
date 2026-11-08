@@ -362,38 +362,44 @@ func cloudAgentAllToolSchemas() []map[string]any {
 
 // Explicit choices stay complete and exclusive. The intent tool may also omit
 // a choice; only the executor's draft/unique-candidate rule can materialize it.
+//
+// 互斥只能用字段描述表达，不能写成顶层 oneOf/anyOf/allOf：OpenAI 兼容网关
+// （当前生产是 Magpie）遇到带顶层组合关键字的工具会静默整条丢弃。实测同一轮
+// 33 个工具里只有带 oneOf 的三个媒体工具（generate_media / generate_media_batch
+// / image_layer_split）消失，模型因此回复「系统没有给我提交生图任务的工具」。
+// 约束的强制点仍在服务端：cloudAgentMediaModelSpec 对混用返回
+// logicalModelId=mutually_exclusive，缺选择返回 required。
 func cloudAgentDeclareMediaModelSelection(tool map[string]any, allowInherited bool) {
 	function, _ := tool["function"].(map[string]any)
 	parameters, _ := function["parameters"].(map[string]any)
 	if parameters == nil {
 		return
 	}
-	nonEmptyString := map[string]any{"type": "string", "minLength": 1}
-	parameters["oneOf"] = []map[string]any{
-		{
-			"required":   []string{"logicalModelId"},
-			"properties": map[string]any{"logicalModelId": nonEmptyString},
-			"not": map[string]any{"anyOf": []map[string]any{
-				{"required": []string{"channelId"}, "properties": map[string]any{"channelId": nonEmptyString}},
-				{"required": []string{"channelModelKey"}, "properties": map[string]any{"channelModelKey": nonEmptyString}},
-			}},
-		},
-		{
-			"required": []string{"channelId", "channelModelKey"},
-			"properties": map[string]any{
-				"channelId":       nonEmptyString,
-				"channelModelKey": nonEmptyString,
-			},
-			"not": map[string]any{"required": []string{"logicalModelId"}, "properties": map[string]any{
-				"logicalModelId": nonEmptyString,
-			}},
-		},
+	// 兼容旧快照或被外部注入的组合关键字：一律清掉，只保留纯 properties 结构。
+	delete(parameters, "oneOf")
+	delete(parameters, "anyOf")
+	delete(parameters, "allOf")
+	properties, _ := parameters["properties"].(map[string]any)
+	if properties == nil {
+		return
 	}
+	rule := "模型选择二选一：只填本字段（logicalModelId），或同时填 channelId+channelModelKey；不得混用，也不传 null 或空白。"
 	if allowInherited {
-		parameters["oneOf"] = append(parameters["oneOf"].([]map[string]any), map[string]any{
-			"not": map[string]any{"anyOf": []map[string]any{{"required": []string{"logicalModelId"}}, {"required": []string{"channelId"}}, {"required": []string{"channelModelKey"}}}},
-		})
+		rule = "模型选择二选一：只填 logicalModelId，或同时填 channelId+channelModelKey，不得混用；三者全省略时由执行器按草稿或本轮唯一候选解析。"
 	}
+	channels := "模型选择二选一：与 logicalModelId 互斥；channelId 与 channelModelKey 必须同时给全，不得混用或留空。"
+	for _, field := range []string{"logicalModelId", "channelId", "channelModelKey"} {
+		property, ok := properties[field].(map[string]any)
+		if !ok {
+			continue
+		}
+		if field == "logicalModelId" {
+			property["description"] = rule
+			continue
+		}
+		property["description"] = channels
+	}
+	parameters["additionalProperties"] = false
 }
 
 func CloudAgentSupportedToolNames() []string {
