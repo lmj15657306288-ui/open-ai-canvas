@@ -416,7 +416,10 @@ func TestVideoReplicationAnalysisLeaseExpiry(t *testing.T) {
 	if err := svc.repo.CreateVideoReplicationProject(project); err != nil {
 		t.Fatal(err)
 	}
-	lease := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	// 租约与仓储里的 now 比较口径必须同源：实现用本地时间的 time.Now() 做条件比较，
+	// 这里若转成 UTC，SQLite 会把两侧存成带时区偏移的字符串做字典序比较，
+	// 在非 UTC 时区（如 +08:00）下 "04:03+00:00" < "12:03+08:00" 会被误判为已过期。
+	lease := time.Now().Add(time.Minute).Truncate(time.Second)
 	if claimed, err := svc.repo.ClaimVideoReplicationAnalysis("user-1", project.ID, lease); err != nil || !claimed {
 		t.Fatalf("claim = %v %v", claimed, err)
 	}
