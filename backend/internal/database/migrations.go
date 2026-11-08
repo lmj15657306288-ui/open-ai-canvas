@@ -328,6 +328,10 @@ var schemaMigrations = []migration{
 		}
 		return nil
 	}},
+	{version: 93, name: "ecommerce_video_replication", checksum: "sha256:ecommerce-video-replication-v93-20261108", apply: func(tx *gorm.DB) error {
+		// 电商 Agent「商品视频」（模特/商品替换复刻）：只新增四张 video_replication_* 表。
+		return tx.AutoMigrate(&model.VideoReplicationProject{}, &model.VideoReplicationAsset{}, &model.VideoReplicationShotRun{}, &model.VideoReplicationOutput{})
+	}},
 }
 
 // migrateReferenceVideoCostPrice 为价格档成本和账单成本快照增加带参考视频的成本价。
