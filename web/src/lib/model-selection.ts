@@ -30,6 +30,14 @@ export type DisplayModelGroup = {
     models: string[];
 };
 
+// 尺寸是否被模型声明：枚举直列、允许自由输入，或命中像素预设（声明式线路只列比例）。
+export function imageSizeDeclaredBy(image: ImageCapabilityConfig, size: string) {
+    const value = (size || "").trim();
+    if (!value) return true;
+    if (image.size.allowCustom || image.size.values.includes(value)) return true;
+    return Boolean((image.size.presets || []).some((preset) => preset.size === value));
+}
+
 export type ModelReferenceLimits = {
     maxImages: number;
     maxVideos: number;
@@ -132,7 +140,9 @@ export function modelCompatibilityError(config: AiConfig, model: string, require
     if (capability === "image") {
         const image = modelCapabilityConfigFor(config, model).image!;
         // 尺寸兼容不依赖输入摘要：无输入时（如画布重试/工具链）也要按尺寸过滤组内模型。
-        if (requirements.imageSize && !image.size.allowCustom && !image.size.values.includes(requirements.imageSize)) return "不支持当前尺寸";
+        // 声明式像素线路的 size 枚举只列画幅比例，像素值由预设承载；审批卡回传的就是预设像素，
+        // 若只比枚举会判成「不支持当前尺寸」，导致卡上任何改动都被静默丢弃。
+        if (requirements.imageSize && !imageSizeDeclaredBy(image, requirements.imageSize)) return "不支持当前尺寸";
         if (!input) return "";
         if (input.videoCount > 0) return "图片模型不支持参考视频";
         if (input.audioCount > 0) return "图片模型不支持参考音频";

@@ -5,7 +5,7 @@ import { ModelPicker } from "@/components/model-picker";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { agentApprovalModel, agentApprovalModelSelection, agentMediaSettings, type AgentImageApproval } from "@/lib/canvas/agent-media-approval";
 import { modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
-import { parseImageParameters } from "@/lib/image-parameters";
+import { parseImageParameters, imageSizeForQualityChange } from "@/lib/image-parameters";
 import { resolveCompatibleModel, type ModelRequirements } from "@/lib/model-selection";
 import type { AgentMediaSettings } from "@/services/api/agent";
 import { PUBLIC_MODEL_CATALOG_ID, resolveModelRequestConfig, useEffectiveConfig } from "@/stores/use-config-store";
@@ -47,7 +47,11 @@ export function CanvasAgentImageApprovalSettings({ initial, value, onChange, the
             const current = agentMediaSettings(previous || initial);
             const imageParameters = approvalImageParameters(key === "imageParameters" ? next : current.imageParameters);
             if (key === "imageParameters") return { ...current, imageParameters };
-            const options = { size: current.size, imageResolution: current.imageResolution, quality: current.quality, [key]: next };
+            // 画幅固定比例、像素由档位决定时，改质量必须同时重算像素，否则会提交
+            // 「1K 像素 + high 档位」这种自相矛盾的组合，上游按旧像素出图。
+            const profile = modelCapabilityConfigFor(config, agentApprovalModel(config, current)).image;
+            const size = key === "quality" && profile ? imageSizeForQualityChange(profile, current.size, next) : current.size;
+            const options = { size, imageResolution: current.imageResolution, quality: current.quality, [key]: next };
             const selected = resolveCompatibleModel(config, agentApprovalModel(config, current), { ...requirements, imageSize: options.size, options: { ...options, count: 1 } });
             if (!selected) return previous;
             return { ...agentApprovalModelSelection(config, selected), ...options, imageParameters };

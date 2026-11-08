@@ -90,7 +90,8 @@ export function imagePresetForRatio(tier: ImageResolutionTier, input: string): I
 }
 
 export function imageQualityForTier(profile: ImageCapabilityConfig, tier: ImageResolutionTier) {
-    if (profile.parameters) return undefined;
+    // 声明式线路没有独立分辨率参数时，档位就是 quality 的 low / medium / high。
+    // 选档位必须同时写回 quality，否则后端仍按旧 quality 换算像素，卡上像素与实际上游不一致。
     const aliases: Record<string, string[]> = { "1k": ["1k", "low"], "1.5k": ["1.5k"], "2k": ["2k", "medium"], "4k": ["4k", "high"] };
     return profile.quality.supported ? profile.quality.values.find((value) => aliases[tier]?.includes(value.toLowerCase())) : undefined;
 }
@@ -121,7 +122,9 @@ export function imageTierAvailable(profile: ImageCapabilityConfig, tier: ImageRe
 }
 
 export function imageQualityForSelection(profile: ImageCapabilityConfig, tier: ImageResolutionTier) {
-    if (profile.parameters) return undefined;
+    // 声明式线路：没有独立分辨率参数时档位就是 quality，选档位必须一起写回；
+    // 有分辨率参数时 quality 是另一维，不能被档位覆盖。
+    if (profile.parameters) return profile.resolution.supported ? undefined : imageQualityForTier(profile, tier);
     if (imageResolutionUsesQuality(profile)) return imageQualityForTier(profile, tier);
     return !profile.resolution.supported && !profile.quality.supported && imageTierAvailable(profile, tier) ? tier : undefined;
 }

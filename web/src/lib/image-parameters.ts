@@ -1,6 +1,6 @@
 import type { ImageCapabilityConfig } from "@/lib/model-capabilities";
 import type { CapabilitySpec, OptionConstraint } from "@/services/api/logical-models";
-import { DEFAULT_IMAGE_RATIOS, imagePresetForRatio, imageSizeConfigWithPresets } from "./image-size-presets";
+import { DEFAULT_IMAGE_RATIOS, imagePresetForRatio, imageQualityTier, imageSizeConfigWithPresets } from "./image-size-presets";
 
 export type ImageParameterValue = string | number | boolean;
 export type ImageParameter = {
@@ -193,6 +193,20 @@ export function initializeImageRatioDefaults(profile: ImageCapabilityConfig, def
         );
     if (!added.length) return profile;
     return updateImageParameterSize(profile, imageSizeConfigWithPresets(profile, [...existing, ...added]));
+}
+
+// 画幅固定为比例、像素由档位（quality 的 low/medium/high）决定时，改档位必须
+// 同步重算像素；否则会提交「1K 像素 + high 档位」这种自相矛盾的组合。
+export function imageSizeForQualityChange(profile: ImageCapabilityConfig, size: string, quality: string) {
+    const field = profile.parameters?.find((p) => p.name === "size" && p.enabled !== false);
+    if (!field || field.encoding !== "pixels" || profile.resolution.supported) return size;
+    const presets = profile.size.presets || [];
+    const ratio = presets.find((preset) => preset.size === size)?.ratio || (String(size).includes(":") ? String(size) : "");
+    if (!ratio) return size;
+    const tier = imageQualityTier(quality);
+    if (!tier) return size;
+    const next = presets.find((preset) => preset.ratio === ratio && preset.tier === tier);
+    return next ? next.size : size;
 }
 
 export function resolveImageParameters(profile: ImageCapabilityConfig, definitions: ImageParameter[], model: string) {
