@@ -634,6 +634,17 @@ func (s *Service) resolveSystemChannelModelSelection(access *userGroupAccess, in
 	applyChannelCapabilityDefaults(nextConfig, channelModel.Capability, capabilityConfig)
 	if capabilityConfig != nil && capabilityConfig.Image != nil && capabilityConfig.Image.Parameters != nil {
 		parameters := capabilityConfig.Image.Parameters
+		// 审批卡回传、前端 strict 提交的都是换算表里的像素值，而模型侧 size 枚举只列
+		// 比例；路由阶段必须与准入同样放宽，否则像素值在选价前就被判超范围。
+		submitted := metadataString(nextConfig, "size")
+		if raw, ok := nextConfig["imageParameters"].(map[string]any); ok {
+			if value := imageParameterText(raw["size"]); value != "" {
+				submitted = value
+			}
+		}
+		if widened := imageParametersAcceptingSizeValue(capabilityConfig.Image, submitted); widened != nil {
+			parameters = widened
+		}
 		values := declaredImageParameterValues(nextConfig, parameters)
 		if explicit, ok := input["capabilityOptions"].(map[string]any); ok {
 			values = explicit

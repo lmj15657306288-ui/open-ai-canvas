@@ -2,8 +2,10 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
+	"yingce/backend/internal/model"
 )
 
 // 声明式像素线路的线上配置（size 只列比例、像素在 presets 里、档位由 quality 承载）。
@@ -68,6 +70,59 @@ func TestDeclaredPixelSizeAdmissionWithRealChannelConfig(t *testing.T) {
 			t.Fatalf("%s: 出网尺寸 = %q，期望 %q", c.name, taskInput.Config.Size, c.wantSize)
 		}
 		if got := imageParameterText(taskInput.Config.ImageParameters["size"]); got != c.wantSize {
+			t.Fatalf("%s: 出网参数尺寸 = %q，期望 %q", c.name, got, c.wantSize)
+		}
+	}
+}
+
+// 走完整的系统渠道准入链路（仓库 + 协议 + 价档），确认审批卡回传的像素值在真实路径上也能通过。
+func TestDeclaredPixelSizeAdmissionThroughSystemChannel(t *testing.T) {
+	raw, err := os.ReadFile("testdata/panda_gpt_image_25.json")
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var profile ModelCapabilityConfig
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	svc, _, channel, cm := createSystemChannelSelectionFixture(t, "image", model.ChannelInterfaceOpenAIImage, &profile, []model.ChannelModelPriceTier{
+		newSelectionPriceTier("tier", `{}`, "provider-default", "fixed_request"),
+	})
+	cases := []struct {
+		name     string
+		size     string
+		quality  string
+		params   map[string]any
+		wantSize string
+	}{
+		{"像素参数 1K", "1024x1824", "auto", map[string]any{"size": "1024x1824", "quality": "auto"}, "1024x1824"},
+		{"比例参数 4K", "2160x3840", "high", map[string]any{"size": "9:16", "quality": "high"}, "2160x3840"},
+		{"无参数 4K", "2160x3840", "high", nil, "2160x3840"},
+		{"像素参数 high", "2160x3840", "high", map[string]any{"size": "2160x3840", "quality": "high"}, "2160x3840"},
+		{"像素参数 medium", "1536x2752", "medium", map[string]any{"size": "1536x2752", "quality": "medium"}, "1536x2752"},
+	}
+	for _, c := range cases {
+		config := map[string]any{
+			"channelId": channel.ID, "model": cm.ModelKey,
+			"size": c.size, "quality": c.quality, "imageParameters": c.params,
+		}
+		if c.params == nil {
+			delete(config, "imageParameters")
+		}
+		input := map[string]any{"mode": "image", "prompt": "一朵白玫瑰", "config": config}
+		resolved, err := svc.resolveSystemChannelModelSelection(testGroupAccess(svc), input, "canvas_image", "image")
+		if err != nil {
+			t.Fatalf("%s: 路由失败: %v", c.name, err)
+		}
+		if err := svc.ValidateTaskCapability(resolved); err != nil {
+			t.Fatalf("%s: 准入被拒绝: %v", c.name, err)
+		}
+		finalConfig, _ := resolved["config"].(map[string]any)
+		if got := fmt.Sprint(finalConfig["size"]); got != c.wantSize {
+			t.Fatalf("%s: 出网尺寸 = %q，期望 %q", c.name, got, c.wantSize)
+		}
+		params, _ := finalConfig["imageParameters"].(map[string]any)
+		if got := imageParameterText(params["size"]); got != c.wantSize {
 			t.Fatalf("%s: 出网参数尺寸 = %q，期望 %q", c.name, got, c.wantSize)
 		}
 	}

@@ -421,6 +421,11 @@ func normalizeImageSizeIntent(spec CapabilitySpec, intent ModelRequestIntent) Mo
 	}
 	preset, ok := declaredImageSizePreset(spec.ImageSize.Presets, value, tier, "")
 	if !ok {
+		// 档位是 auto/未声明档位时不能因此丢掉「像素 → 比例」的还原：审批卡批准的是
+		// 换算好的像素，路由仍须把它认回同一个画幅，否则会被判成不支持的取值。
+		preset, ok = declaredImageSizePreset(spec.ImageSize.Presets, value, "", "")
+	}
+	if !ok {
 		return intent
 	}
 	options := make(map[string]any, len(intent.Options))

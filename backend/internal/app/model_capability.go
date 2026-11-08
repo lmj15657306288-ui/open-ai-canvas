@@ -446,12 +446,10 @@ func CapabilitySpecFromModelCapabilityConfig(config *ModelCapabilityConfig, capa
 		}
 		if image.Size.Parameter != "none" {
 			spec.Options["size"] = imageSizeOptionConstraint(image.Size)
+			// 预设表保持全量：声明式线路（size 是参数、像素档由 quality 承载）的档位
+			// 只在请求时才能由 quality 解析，这里若按“唯一默认档”裁成空集，
+			// 审批卡回传的像素值就再也换算不回画幅，路由会直接判成不支持的取值。
 			spec.ImageSize = capabilityImageSizeFromConfig(image.Size)
-			if image.Parameters != nil && !image.Resolution.Supported {
-				size := image.Size
-				size.Presets = activeImageSizePresets(image)
-				spec.ImageSize = capabilityImageSizeFromConfig(size)
-			}
 		}
 		if image.Resolution.Supported {
 			spec.Options["imageResolution"] = anyValues(image.Resolution.Values)
