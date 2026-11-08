@@ -93,3 +93,33 @@ func TestEnumPixelImageLineAdmitsAgentPayload(t *testing.T) {
 		}
 	}
 }
+
+// 审批卡把换算好的像素值直接展示给用户，提交时原样回传 {size:"1024x1824"}。
+// 模型侧 size 枚举只列比例，准入曾因此把用户点确认的那一次判成「画幅 / 尺寸
+// 超出支持范围」——预览能算出像素、提交却过不了自己的枚举，是最难自查的一类自锁。
+func TestApprovalCardPixelSizeSurvivesResubmit(t *testing.T) {
+	protocol := string(model.ChannelInterfaceOpenAIImage)
+	profile := enumPixelImageProfile()
+	if !fillMissingImageSizePresets(profile, protocol) {
+		t.Fatal("声明式 pixels 线路没有补齐换算表")
+	}
+	for _, tc := range []struct{ size, quality, want string }{
+		{size: "1024x1824", quality: "auto", want: "1024x1824"},
+		{size: "1024x1824", quality: "", want: "1024x1824"},
+		{size: "1536x2752", quality: "medium", want: "1536x2752"},
+		{size: "1024x1824", quality: "high", want: "2160x3840"},
+	} {
+		config := &providerConfig{InterfaceType: protocol, Size: tc.size, Quality: tc.quality}
+		if err := applyImageParameterValues(config, profile); err != nil {
+			t.Fatalf("卡上像素 size=%s quality=%s 提交失败：%v", tc.size, tc.quality, err)
+		}
+		if config.Size != tc.want {
+			t.Fatalf("卡上像素 size=%s quality=%s 出网 %q，期望 %q", tc.size, tc.quality, config.Size, tc.want)
+		}
+		// 复核阶段（validateImageTask 开头）必须同样接受这个像素值。
+		input := canvasGenerationInput{Config: providerConfig{InterfaceType: protocol, Size: config.Size, Quality: config.Quality, ImageParameters: config.ImageParameters}}
+		if err := validateImageTask(profile, input); err != nil {
+			t.Fatalf("复核拒绝已批准的像素尺寸 %q：%v", config.Size, err)
+		}
+	}
+}

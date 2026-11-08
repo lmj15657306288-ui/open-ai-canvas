@@ -246,6 +246,18 @@ func imageParameterDefaults(parameters []protocol.ImageParameter) map[string]any
 	return result
 }
 
+// imageParameterText 把参数值转成去空白的文本，nil 与空值都返回空串。
+func imageParameterText(value any) string {
+	if value == nil {
+		return ""
+	}
+	text := fmt.Sprint(value)
+	if text == "<nil>" {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
 func imageParameterValue(p protocol.ImageParameter, value any) any {
 	text, ok := value.(string)
 	if !ok || p.Type == "string" {
@@ -302,21 +314,75 @@ func imageParameterAdmissionError(field, issue, message string) error {
 	})
 }
 
+// imageSizePresetDeclares 判断某个像素值是否就是本线路换算表里声明的尺寸。
+func imageSizePresetDeclares(profile *ImageCapabilityConfig, size string) bool {
+	if profile == nil {
+		return false
+	}
+	value := strings.TrimSpace(size)
+	if value == "" {
+		return false
+	}
+	for _, preset := range profile.Size.Presets {
+		if strings.EqualFold(strings.TrimSpace(preset.Size), value) {
+			return true
+		}
+	}
+	return false
+}
+
+// imageSizeRatioForAnyTier 把换算表里的像素还原成比例，不限档位。
+// 审批卡回传的是某个档位的像素；用户改档位后要按新档位重算，先得知道它原本的比例。
+func imageSizeRatioForAnyTier(profile *ImageCapabilityConfig, size string) string {
+	if profile == nil || !imageSizePixelShaped(size) {
+		return ""
+	}
+	value := strings.TrimSpace(size)
+	for _, preset := range profile.Size.Presets {
+		if strings.EqualFold(strings.TrimSpace(preset.Size), value) {
+			return strings.TrimSpace(preset.Ratio)
+		}
+	}
+	return ""
+}
+
 // imageParametersAcceptingPresetSizes 把换算表里的像素并入 size 参数枚举后返回副本。
 // 出网尺寸是按「比例 + 档位」换算出的像素值，而模型侧枚举通常只列比例和少量像素示例；
 // 任务输入在准入阶段已经把 size 改写成像素，复核时不能再拿窄枚举把它判成不支持。
 // 只放宽 size 参数，且只放宽到本线路换算表里真实存在的像素，档位与比例仍由
 // validateImageTask 的选档校验把关，不放宽跨档取像素。
 func imageParametersAcceptingPresetSizes(profile *ImageCapabilityConfig) []protocol.ImageParameter {
-	if profile == nil || len(profile.Parameters) == 0 || len(profile.Size.Presets) == 0 {
+	return imageParametersAcceptingSizeValue(profile, "")
+}
+
+// imageSizePixelShaped 判断一个尺寸值是不是已经换算好的像素值（WIDTHxHEIGHT）。
+func imageSizePixelShaped(value string) bool {
+	left, right, found := strings.Cut(strings.ToLower(strings.TrimSpace(value)), "x")
+	if !found {
+		return false
+	}
+	width, widthErr := strconv.Atoi(left)
+	height, heightErr := strconv.Atoi(right)
+	return widthErr == nil && heightErr == nil && width > 0 && height > 0
+}
+
+// imageParametersAcceptingSizeValue 在换算表之外，再接受本轮实际提交的那一个像素值。
+// 审批卡会把换算好的像素值原样回传（用户看到的就是这个尺寸），但模型侧枚举只列比例；
+// 若只按枚举校验，用户点了确认反而会卡在「画幅 / 尺寸 超出支持范围」。
+// 只放宽 size 参数本身，且仅当该参数自己就声明 encoding=pixels（像素本就是它的出网形态）。
+func imageParametersAcceptingSizeValue(profile *ImageCapabilityConfig, submitted string) []protocol.ImageParameter {
+	if profile == nil || len(profile.Parameters) == 0 {
 		return nil
 	}
+	submitted = strings.TrimSpace(submitted)
 	widened := make([]protocol.ImageParameter, 0, len(profile.Parameters))
 	changed := false
 	for _, p := range profile.Parameters {
-		if p.Name == "size" && p.Encoding == "pixels" {
-			seen := make(map[string]bool, len(p.Values)+len(profile.Size.Presets))
-			values := make([]any, 0, len(p.Values)+len(profile.Size.Presets))
+		// 枚举为空表示该字段完全自由：此时任何值本来就被接受，再并入预设反而会把它
+		// 从「自由输入」变成窄枚举，把比例值挡在外面。
+		if p.Name == "size" && p.Encoding == "pixels" && len(p.Values) > 0 {
+			seen := make(map[string]bool, len(p.Values)+len(profile.Size.Presets)+1)
+			values := make([]any, 0, len(p.Values)+len(profile.Size.Presets)+1)
 			for _, value := range p.Values {
 				key := fmt.Sprint(value)
 				if seen[key] {
@@ -325,14 +391,19 @@ func imageParametersAcceptingPresetSizes(profile *ImageCapabilityConfig) []proto
 				seen[key] = true
 				values = append(values, value)
 			}
-			for _, preset := range profile.Size.Presets {
-				resolved := strings.TrimSpace(preset.Size)
-				if resolved == "" || seen[resolved] {
-					continue
+			add := func(candidate string) {
+				if candidate == "" || seen[candidate] {
+					return
 				}
-				seen[resolved] = true
-				values = append(values, resolved)
+				seen[candidate] = true
+				values = append(values, candidate)
 				changed = true
+			}
+			for _, preset := range profile.Size.Presets {
+				add(strings.TrimSpace(preset.Size))
+			}
+			if imageSizePixelShaped(submitted) {
+				add(submitted)
 			}
 			p.Values = values
 		}
@@ -458,6 +529,18 @@ func applyImageParameterValues(config *providerConfig, profile *ImageCapabilityC
 	for _, field := range profile.Parameters {
 		if field.Name == "size" && !field.Accepts(values["size"]) {
 			size := fmt.Sprint(values["size"])
+			// 提交值本来就是换算表里的像素（审批卡回传的就是它）：先按本轮档位
+			// 重算到同一比例的目标像素（用户可能刚把质量改成高清），档位无法解析时
+			// 保留卡上的像素——绝不能退回比例：多档线路在档位缺省时
+			// activeImageSizePresets 返回空集，退回比例就再也换算不回来。
+			if field.Encoding == "pixels" && imageSizePixelShaped(size) && imageSizePresetDeclares(profile, size) {
+				if ratio := imageSizeRatioForAnyTier(profile, size); ratio != "" {
+					if mapped := resolveImageTaskSize(profile, config.InterfaceType, ratio, tier); imageSizePixelShaped(mapped) {
+						values["size"] = mapped
+					}
+				}
+				continue
+			}
 			if pixels := resolveImageTaskSize(profile, config.InterfaceType, size, tier); field.Encoding == "pixels" && field.Accepts(pixels) {
 				values["size"] = pixels
 			} else if ratio := imageSizeRatioForDeclaredPreset(profile, size, tier); ratio != "" && field.Accepts(ratio) {
@@ -465,7 +548,13 @@ func applyImageParameterValues(config *providerConfig, profile *ImageCapabilityC
 			}
 		}
 	}
-	resolved, err := resolveImageParameterValues(profile.Parameters, values)
+	// 审批卡回传的是换算好的像素值，而模型侧枚举只列比例；准入必须接受
+	// 「本轮提交的这个像素值」，否则用户点确认反而会卡在尺寸超出支持范围。
+	parameters := profile.Parameters
+	if widened := imageParametersAcceptingSizeValue(profile, imageParameterText(values["size"])); widened != nil {
+		parameters = widened
+	}
+	resolved, err := resolveImageParameterValues(parameters, values)
 	if err != nil {
 		return err
 	}
@@ -481,7 +570,11 @@ func applyImageParameterValues(config *providerConfig, profile *ImageCapabilityC
 	if imageSizePixelOutbound(profile, config.InterfaceType) {
 		// 用投影前算好的档位：resolveImageParameterValues 只保留已声明字段，
 		// 声明式线路没有 quality 字段时会把 config.Quality 清零，重算就拿不到档位了。
-		config.Size = resolveImageTaskSize(profile, config.InterfaceType, config.Size, tier)
+		// 已经是换算表里的像素值时不再重算：审批卡批准的就是这个尺寸，档位缺省
+		// （例如草稿没声明 quality）时重算只会把它退化成比例再失败。
+		if !(imageSizePixelShaped(config.Size) && imageSizePresetDeclares(profile, config.Size)) {
+			config.Size = resolveImageTaskSize(profile, config.InterfaceType, config.Size, tier)
+		}
 		if strings.Contains(config.Size, ":") {
 			return BadAuthRequest("当前比例与分辨率缺少明确的像素尺寸映射")
 		}
