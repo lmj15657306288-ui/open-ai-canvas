@@ -72,6 +72,28 @@ RUN apk add --no-cache ca-certificates tzdata wget ffmpeg \
     && addgroup -S app \
     && adduser -S app -G app
 
+# yt-dlp：分享链接解析（B 站/YouTube/X 等，见 internal/videoparser）。
+# 用官方 musl 静态二进制而不是 apk 安装——alpine 的 yt-dlp 会连带拉进 python3/glib
+# 约 170MB 依赖，构建多花 3 分钟；静态二进制只有 37MB。
+# 版本固定并校验官方 SHA2-256SUMS，避免 latest 漂移导致构建不可复现。
+ARG TARGETARCH
+ARG YTDLP_VERSION=2025.11.12
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) ytdlp_file=yt-dlp_musllinux ;; \
+      arm64) ytdlp_file=yt-dlp_musllinux_aarch64 ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    base="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}"; \
+    cd /tmp; \
+    wget -q -O yt-dlp "${base}/${ytdlp_file}"; \
+    wget -q -O SHA2-256SUMS "${base}/SHA2-256SUMS"; \
+    grep " ${ytdlp_file}\$" SHA2-256SUMS > yt-dlp.sums; \
+    sed "s|  ${ytdlp_file}\$|  yt-dlp|" yt-dlp.sums | sha256sum -c -; \
+    install -m 0755 yt-dlp /usr/local/bin/yt-dlp; \
+    rm -f yt-dlp SHA2-256SUMS yt-dlp.sums; \
+    yt-dlp --version
+
 WORKDIR /app
 ENV GIN_MODE=release
 ENV CANVAS_BACKEND_ADDR=:8080
