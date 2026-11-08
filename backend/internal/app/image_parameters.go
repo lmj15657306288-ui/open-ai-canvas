@@ -302,6 +302,48 @@ func imageParameterAdmissionError(field, issue, message string) error {
 	})
 }
 
+// imageParametersAcceptingPresetSizes 把换算表里的像素并入 size 参数枚举后返回副本。
+// 出网尺寸是按「比例 + 档位」换算出的像素值，而模型侧枚举通常只列比例和少量像素示例；
+// 任务输入在准入阶段已经把 size 改写成像素，复核时不能再拿窄枚举把它判成不支持。
+// 只放宽 size 参数，且只放宽到本线路换算表里真实存在的像素，档位与比例仍由
+// validateImageTask 的选档校验把关，不放宽跨档取像素。
+func imageParametersAcceptingPresetSizes(profile *ImageCapabilityConfig) []protocol.ImageParameter {
+	if profile == nil || len(profile.Parameters) == 0 || len(profile.Size.Presets) == 0 {
+		return nil
+	}
+	widened := make([]protocol.ImageParameter, 0, len(profile.Parameters))
+	changed := false
+	for _, p := range profile.Parameters {
+		if p.Name == "size" && p.Encoding == "pixels" {
+			seen := make(map[string]bool, len(p.Values)+len(profile.Size.Presets))
+			values := make([]any, 0, len(p.Values)+len(profile.Size.Presets))
+			for _, value := range p.Values {
+				key := fmt.Sprint(value)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				values = append(values, value)
+			}
+			for _, preset := range profile.Size.Presets {
+				resolved := strings.TrimSpace(preset.Size)
+				if resolved == "" || seen[resolved] {
+					continue
+				}
+				seen[resolved] = true
+				values = append(values, resolved)
+				changed = true
+			}
+			p.Values = values
+		}
+		widened = append(widened, p)
+	}
+	if !changed {
+		return nil
+	}
+	return widened
+}
+
 func resolveImageParameterValues(parameters []protocol.ImageParameter, values map[string]any) (map[string]any, error) {
 	allowed := map[string]protocol.ImageParameter{}
 	result := imageParameterDefaults(parameters)
@@ -387,6 +429,21 @@ func declaredImageParameterValues(config map[string]any, parameters []protocol.I
 	return values
 }
 
+// imageSizeTierValue 选出本轮查像素预设要用的档位来源。
+// 独立声明了 imageResolution 的线路以它为准；没有该参数的声明式线路里
+// quality 的 low/medium/high/auto 就是档位（与 imageResolutionTier 的语义一致）。
+// 只读 ImageResolution 会让这类线路永远拿不到档位，审批卡在
+// 「当前比例与分辨率缺少明确的像素尺寸映射」。
+func imageSizeTierValue(profile *ImageCapabilityConfig, resolution, quality string) string {
+	if profile != nil && profile.Resolution.Supported {
+		return resolution
+	}
+	if value := strings.TrimSpace(quality); value != "" {
+		return value
+	}
+	return resolution
+}
+
 // Admission and worker execution use the same validated values. Core fields are
 // only a transport projection; unknown or disabled extension values fail here.
 func applyImageParameterValues(config *providerConfig, profile *ImageCapabilityConfig) error {
@@ -397,12 +454,13 @@ func applyImageParameterValues(config *providerConfig, profile *ImageCapabilityC
 		"size": config.Size, "imageResolution": config.ImageResolution, "quality": config.Quality,
 		"count": config.Count, "transparentBackground": config.TransparentBackground, "imageParameters": config.ImageParameters,
 	}, profile.Parameters)
+	tier := imageSizeTierValue(profile, config.ImageResolution, config.Quality)
 	for _, field := range profile.Parameters {
 		if field.Name == "size" && !field.Accepts(values["size"]) {
-			size, resolution := fmt.Sprint(values["size"]), config.ImageResolution
-			if pixels := resolveImageTaskSize(profile, config.InterfaceType, size, resolution); field.Encoding == "pixels" && field.Accepts(pixels) {
+			size := fmt.Sprint(values["size"])
+			if pixels := resolveImageTaskSize(profile, config.InterfaceType, size, tier); field.Encoding == "pixels" && field.Accepts(pixels) {
 				values["size"] = pixels
-			} else if ratio := imageSizeRatioForDeclaredPreset(profile, size, resolution); ratio != "" && field.Accepts(ratio) {
+			} else if ratio := imageSizeRatioForDeclaredPreset(profile, size, tier); ratio != "" && field.Accepts(ratio) {
 				values["size"] = ratio
 			}
 		}
@@ -421,14 +479,23 @@ func applyImageParameterValues(config *providerConfig, profile *ImageCapabilityC
 	config.Size, config.ImageResolution, config.Quality = text("size"), text("imageResolution"), text("quality")
 	config.Count, config.TransparentBackground = text("count"), text("transparentBackground")
 	if imageSizePixelOutbound(profile, config.InterfaceType) {
-		config.Size = resolveImageTaskSize(profile, config.InterfaceType, config.Size, config.ImageResolution)
+		// 用投影前算好的档位：resolveImageParameterValues 只保留已声明字段，
+		// 声明式线路没有 quality 字段时会把 config.Quality 清零，重算就拿不到档位了。
+		config.Size = resolveImageTaskSize(profile, config.InterfaceType, config.Size, tier)
 		if strings.Contains(config.Size, ":") {
 			return BadAuthRequest("当前比例与分辨率缺少明确的像素尺寸映射")
 		}
-		// Free pixel parameters must carry the encoded value to the adapter;
-		// ratio enums retain their declared value for plugin validation.
+		// 没有独立分辨率参数的线路，像素只能通过 size 出网：枚举里的比例是模型侧
+		// 输入，预设表才是像素真值（枚举里的像素项通常只是一部分示例，不能拿它
+		// 拦下换算结果，否则会退回成比例发给上游）。有分辨率参数的线路保持原约定：
+		// 比例留在 size，像素由该分辨率参数表达。
 		for _, field := range profile.Parameters {
-			if field.Name == "size" && field.Accepts(config.Size) {
+			if field.Name != "size" {
+				continue
+			}
+			if field.Encoding == "pixels" && !profile.Resolution.Supported {
+				config.ImageParameters["size"] = config.Size
+			} else if field.Accepts(config.Size) {
 				config.ImageParameters["size"] = config.Size
 			}
 		}

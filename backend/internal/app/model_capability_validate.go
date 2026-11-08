@@ -522,7 +522,13 @@ func validateImageTask(profile *ImageCapabilityConfig, input canvasGenerationInp
 		return nil
 	}
 	if profile.Parameters != nil {
-		if _, err := resolveImageParameterValues(profile.Parameters, input.Config.ImageParameters); err != nil {
+		parameters := profile.Parameters
+		// 准入阶段会把 size 改写成换算表里的像素值；复核用同一枚举时要把换算表的
+		// 像素一并视为合法，否则像素型线路每次生成都会被自己的枚举拦下。
+		if widened := imageParametersAcceptingPresetSizes(profile); widened != nil {
+			parameters = widened
+		}
+		if _, err := resolveImageParameterValues(parameters, input.Config.ImageParameters); err != nil {
 			return err
 		}
 	}

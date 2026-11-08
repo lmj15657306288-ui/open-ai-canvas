@@ -65,3 +65,31 @@ func TestEnumPixelImageLineBackfillsSizePresets(t *testing.T) {
 		}
 	}
 }
+
+// 线上 Agent 的真实调用参数是 {size:"9:16", quality:"auto"}，没有 imageResolution。
+// 准入曾经只把 imageResolution 当档位来源，这类线路永远查不到预设，报
+// 「当前比例与分辨率缺少明确的像素尺寸映射」并拒绝提交。
+func TestEnumPixelImageLineAdmitsAgentPayload(t *testing.T) {
+	protocol := string(model.ChannelInterfaceOpenAIImage)
+	profile := enumPixelImageProfile()
+	if !fillMissingImageSizePresets(profile, protocol) {
+		t.Fatal("声明式 pixels 线路没有补齐换算表")
+	}
+	for _, tc := range []struct{ quality, want string }{
+		{quality: "auto", want: "1024x1824"},
+		{quality: "low", want: "1024x1824"},
+		{quality: "medium", want: "1536x2752"},
+		{quality: "high", want: "2160x3840"},
+	} {
+		config := &providerConfig{InterfaceType: protocol, Size: "9:16", Quality: tc.quality}
+		if err := applyImageParameterValues(config, profile); err != nil {
+			t.Fatalf("quality=%s 准入失败：%v", tc.quality, err)
+		}
+		if config.Size != tc.want {
+			t.Fatalf("quality=%s 换算成 %q，期望 %q", tc.quality, config.Size, tc.want)
+		}
+		if params, _ := config.ImageParameters["size"].(string); params != tc.want {
+			t.Fatalf("出网参数 size=%q，期望像素值 %q", params, tc.want)
+		}
+	}
+}
