@@ -13,7 +13,7 @@ import (
 	"yingce/backend/internal/model"
 )
 
-// 爆款复刻分析阶段的模型成本：用户不扣积分（平台承担），但每次真实模型调用都要记成本。三个金额分开记录：
+// 商品视频复刻分析阶段的模型成本：用户不扣积分（平台承担），但每次真实模型调用都要记成本。三个金额分开记录：
 //   - 供应商实际成本：api_call_logs.estimated_cost_micros，按渠道上游单价（model_pricings）估算，每次上游请求一条。
 //   - 魅夜AI 内部成本价：billing_orders 的成本快照（cost_*），按渠道模型价格档的积分成本价与真实用量计算，财务报表据此统计。
 //   - 用户积分收入：同一笔账单的实收金额，固定为 0，不扣用户积分、不写积分流水。
@@ -98,7 +98,7 @@ func (s *Service) meterVideoReplicationCall(ctx context.Context, stage, capabili
 	metadata := providerAnalyticsContext{
 		Service: s, UserID: scope.UserID, TaskID: meter.callID, TraceID: "video-replication:" + scope.ProjectID, RequestID: scope.ProjectID,
 		Capability: capability, Operation: videoReplicationAnalysisScene + ":" + stage, ChannelID: meter.channelID, Model: meter.model,
-		RequestKind: videoReplicationAnalysisRequestKind, CostRecorder: meter.record,
+		RequestKind: videoReplicationAnalysisRequestKind, CostRecorder: meter.record, ProxyURL: s.videoReplicationChannelProxy(provider.ChannelID),
 	}
 	if meter.order != nil {
 		metadata.BillingOrderID = meter.order.ID

@@ -18,7 +18,6 @@ export const frFR: DeepStringRecord<typeof zhCN> = {
         preciseProduct: { label: "Produit précis", hint: "Importez des images du produit" },
         precisePerson: { label: "Personne précise" },
         combination: { label: "Combiné", hint: "Importez tout ce que vous voulez remplacer ensemble (au moins un type)" },
-        dance: { label: "Reproduction de danse", hint: "Importez une image en pied du personnage qui danse", slot: "Image du personnage" },
         voice: "Voix de référence",
     },
     notes: {
@@ -51,7 +50,6 @@ export const frFR: DeepStringRecord<typeof zhCN> = {
     },
     features: {
         replace: { title: "Remplacement mannequin / produit", description: "Analysez un lien de vidéo courte et recréez-la avec vos images." },
-        dance: { description: "Reprenez les mouvements et la musique de la vidéo de référence pour faire danser votre personnage." },
     },
     sharePlatforms: "Douyin / Xiaohongshu / Kuaishou / WeChat Channels",
     studio: {
@@ -63,7 +61,7 @@ export const frFR: DeepStringRecord<typeof zhCN> = {
     },
     results: {
         kind: {
-            hot: "Reproduction virale",
+            hot: "Reproduction vidéo",
             model: "Remplacement du mannequin",
             clothing: "Remplacement des vêtements",
             face: "Remplacement du visage",

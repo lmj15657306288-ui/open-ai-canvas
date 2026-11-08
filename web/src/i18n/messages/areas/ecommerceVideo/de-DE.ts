@@ -11,7 +11,6 @@ export const deDE: DeepStringRecord<typeof zhCN> = {
         preciseProduct: { label: "Präzises Produkt", hint: "Produktbilder hochladen" },
         precisePerson: { label: "Präzise Person" },
         combination: { label: "Kombiniert", hint: "Alles hochladen, was gemeinsam ersetzt werden soll (mindestens eine Art)" },
-        dance: { label: "Tanz nachstellen", hint: "Ganzkörperbild der tanzenden Figur hochladen", slot: "Figurenbild" },
         voice: "Referenzstimme",
     },
     notes: {
@@ -44,7 +43,6 @@ export const deDE: DeepStringRecord<typeof zhCN> = {
     },
     features: {
         replace: { title: "Model-/Produkttausch", description: "Kurzvideo-Link analysieren und mit Ihren Motivbildern nachbilden." },
-        dance: { description: "Bewegungen und Musik des Referenzvideos nutzen, um Ihre Figur tanzen zu lassen." },
     },
     sharePlatforms: "Douyin / Xiaohongshu / Kuaishou / WeChat Channels",
     studio: {
@@ -56,7 +54,7 @@ export const deDE: DeepStringRecord<typeof zhCN> = {
     },
     results: {
         kind: {
-            hot: "Viral-Remake",
+            hot: "Video-Remake",
             model: "Modeltausch",
             clothing: "Kleidungstausch",
             face: "Gesichtstausch",

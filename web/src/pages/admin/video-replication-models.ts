@@ -1,12 +1,14 @@
 import type { ModelCatalogResponse, PublicChannelModel } from "@/services/api/logical-models";
 import type { VideoReplicationVoiceOption } from "@/services/api/video-replication";
+import { encodeChannelModel } from "@/stores/config-model-options";
 
-/** 爆款复刻后台的模型选项与推荐：只按目录里声明的能力与近 24 小时可用率排序，不按模型名称猜测。 */
+/** 电商视频 Agent 后台的模型选项与推荐：只按目录里声明的能力与近 24 小时可用率排序，不按模型名称猜测。 */
 export type ReplicationModelOption = { value: string; label: string; disabled?: boolean; score: number; reason: string };
+export type ReplicationTextModelOption = ReplicationModelOption & { pickerValue: string };
 
 function channelModels(catalog: ModelCatalogResponse) {
-    const rows: Array<{ channel: string; model: PublicChannelModel }> = [];
-    for (const channel of catalog.channels || []) for (const model of channel.models || []) if (model.available !== false) rows.push({ channel: channel.displayName || channel.name, model });
+    const rows: Array<{ channel: string; channelId: string; model: PublicChannelModel }> = [];
+    for (const channel of catalog.channels || []) for (const model of channel.models || []) if (model.available !== false) rows.push({ channel: channel.displayName || channel.name, channelId: channel.id, model });
     return rows;
 }
 
@@ -20,31 +22,31 @@ function availability(model: PublicChannelModel) {
 }
 
 /** 视频理解：必须能读图；能读视频的优先，其次可读图片多、上下文长、近期可用率高。 */
-export function visionModelOptions(catalog: ModelCatalogResponse): ReplicationModelOption[] {
+export function visionModelOptions(catalog: ModelCatalogResponse): ReplicationTextModelOption[] {
     return channelModels(catalog)
         .filter(({ model }) => model.capability === "text")
-        .map(({ channel, model }) => {
+        .map(({ channel, channelId, model }) => {
             const refs = model.capabilityConfig?.text?.references || {};
             const images = Number(refs.maxImages) || 0;
             const videos = Number(refs.maxVideos) || 0;
             const context = Number(model.capabilityConfig?.text?.contextWindowTokens) || 0;
             const score = (videos > 0 ? 1000 : 0) + Math.min(images, 20) * 20 + context / 20000 + availability(model) * 100;
             const reason = [videos > 0 ? "支持视频输入" : "", images ? `图片 ≤${images} 张` : "", context ? `上下文 ${Math.round(context / 1000)}k` : ""].filter(Boolean).join(" · ");
-            return { value: `channel:${model.id}`, label: `${label(model, channel)} · ${reason || "未配置图片输入"}`, disabled: images < 1, score, reason: reason || "未配置图片输入" };
+            return { value: `channel:${model.id}`, pickerValue: encodeChannelModel(channelId, model.modelKey), label: `${label(model, channel)} · ${reason || "未配置图片输入"}`, disabled: images < 1, score, reason: reason || "未配置图片输入" };
         })
         .sort((a, b) => Number(a.disabled) - Number(b.disabled) || b.score - a.score);
 }
 
 /** 分镜策划：输出长度与上下文优先（需要一次写完整条分镜与口播），近期可用率作为次要因素。 */
-export function planningModelOptions(catalog: ModelCatalogResponse): ReplicationModelOption[] {
+export function planningModelOptions(catalog: ModelCatalogResponse): ReplicationTextModelOption[] {
     return channelModels(catalog)
         .filter(({ model }) => model.capability === "text")
-        .map(({ channel, model }) => {
+        .map(({ channel, channelId, model }) => {
             const output = Number(model.capabilityConfig?.text?.maxOutputTokens) || 0;
             const context = Number(model.capabilityConfig?.text?.contextWindowTokens) || 0;
             const score = output / 500 + context / 20000 + availability(model) * 100;
             const reason = [output ? `输出 ${Math.round(output / 1000)}k` : "", context ? `上下文 ${Math.round(context / 1000)}k` : ""].filter(Boolean).join(" · ");
-            return { value: `channel:${model.id}`, label: `${label(model, channel)}${reason ? ` · ${reason}` : ""}`, score, reason: reason || "文本模型" };
+            return { value: `channel:${model.id}`, pickerValue: encodeChannelModel(channelId, model.modelKey), label: `${label(model, channel)}${reason ? ` · ${reason}` : ""}`, score, reason: reason || "文本模型" };
         })
         .sort((a, b) => b.score - a.score);
 }

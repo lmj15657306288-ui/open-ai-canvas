@@ -23,7 +23,7 @@ import (
 	"yingce/backend/internal/model"
 )
 
-// 爆款复刻的本地媒体处理：ffprobe 真实探测、ffmpeg 场景切换检测、关键帧与音轨抽取。
+// 商品视频复刻的本地媒体处理：ffprobe 真实探测、ffmpeg 场景切换检测、关键帧与音轨抽取。
 // 镜头检测使用 ffmpeg 的 scene 评分（与 PySceneDetect ContentDetector 同类的帧间内容差异），
 // 后端镜像只装了 ffmpeg，不额外引入 Python/OpenCV 运行时。
 
@@ -157,11 +157,15 @@ func parseFrameRate(value string) float64 {
 
 // validateVideoReplicationDuration 按 4–15 秒校验真实时长；容器时长会有几十毫秒的取整误差。
 func validateVideoReplicationDuration(durationMs int64) error {
+	return validateVideoReplicationDurationLimit(durationMs, 120)
+}
+
+func validateVideoReplicationDurationLimit(durationMs int64, maxSeconds int) error {
 	if durationMs < videoReplicationMinDurationMs-videoReplicationDurationSlackMs {
 		return BadAuthRequest(fmt.Sprintf("参考视频时长 %.1f 秒，短于 4 秒", float64(durationMs)/1000))
 	}
-	if durationMs > videoReplicationMaxDurationMs+videoReplicationDurationSlackMs {
-		return BadAuthRequest(fmt.Sprintf("参考视频时长 %.1f 秒，超过 120 秒", float64(durationMs)/1000))
+	if durationMs > int64(maxSeconds)*1000+videoReplicationDurationSlackMs {
+		return BadAuthRequest(fmt.Sprintf("参考视频时长 %.1f 秒，超过 %d 秒", float64(durationMs)/1000, maxSeconds))
 	}
 	return nil
 }
@@ -405,7 +409,7 @@ func (s *Service) videoReplicationTranscriberFor(userID string) (videoReplicatio
 	}
 	baseURL := strings.TrimSpace(os.Getenv(whisperLangEnv))
 	if baseURL == "" {
-		return nil, "未配置语音识别：请在爆款复刻后台选择语音识别模型"
+		return nil, "未配置语音识别：请在电商视频 Agent 后台选择语音识别模型"
 	}
 	return func(ctx context.Context, wavPath string) ([]timelineTranscriptionSegment, string, error) {
 		started := time.Now()

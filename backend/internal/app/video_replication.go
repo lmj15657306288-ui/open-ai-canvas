@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"gorm.io/gorm"
@@ -15,7 +16,7 @@ import (
 	"yingce/backend/internal/model"
 )
 
-// 爆款复刻（影棚视频的一种创作模式）的项目、素材与 @ 引用。
+// 商品视频复刻（影棚视频的一种创作模式）的项目、素材与 @ 引用。
 // 工作流：素材检查 → ffmpeg 解析参考视频 → 识图模型理解镜头 → 商品/模特档案 → 策划模型重构分镜
 // → 用户确认/编辑分镜 → 逐镜头提交工作台视频任务 → 时间线渲染任务合成成片。
 
@@ -77,6 +78,8 @@ type VideoReplicationParameters struct {
 	Auto           bool    `json:"auto,omitempty"`
 	SegmentSeconds int     `json:"segmentSeconds,omitempty"`
 	AutoEstimate   float64 `json:"autoEstimate,omitempty"`
+	// MaxVideoTasks 是用户本次一键生成确认的付费视频任务数上限。
+	MaxVideoTasks int `json:"maxVideoTasks,omitempty"`
 	// ConfirmFirst 为 true 时是「先分析、再确认生成」：分析完成后停在复刻方案，用户确认费用后才提交付费任务。
 	ConfirmFirst bool `json:"confirmFirst,omitempty"`
 	// RewriteVoice（重做口播）：按用户的商品改写参考视频的口播台词；关闭时沿用原台词。
@@ -88,14 +91,18 @@ type VideoReplicationParameters struct {
 	AudioMode string `json:"audioMode,omitempty"`
 	// SubjectHint 是商品替换时用户指定的原视频商品主体（例如「上衣」），最多 10 字。
 	SubjectHint string `json:"subjectHint,omitempty"`
+	// ProductName 是新商品名称，与原视频里的商品主体分开。
+	ProductName string `json:"productName,omitempty"`
 	// MaxReferenceAudios 是所选模型可接收的参考音频数（来自模型能力配置），0 表示不发送参考音色。
 	MaxReferenceAudios int `json:"maxReferenceAudios,omitempty"`
 	// MaxReferenceVideos / MaxReferenceVideoSeconds 来自所选模型能力：能接收参考视频时走「原片编辑」，
 	// 每段把对应的原视频片段作为参考视频发送，只替换目标，场景、动作与运镜沿用原片。
 	MaxReferenceVideos       int `json:"maxReferenceVideos,omitempty"`
 	MaxReferenceVideoSeconds int `json:"maxReferenceVideoSeconds,omitempty"`
-	// Dance 标记电商 Agent「跳舞复刻」提交，用于后台单独开关。
-	Dance bool `json:"dance,omitempty"`
+	// MaxReferenceAudioSeconds / PromptMaxChars 同样来自后台渠道给所选模型配的能力（参考音频时长、提示词字数），
+	// 开始生成时由服务端按模型配置重写（applyVideoReplicationModelLimits），不在代码里写死。
+	MaxReferenceAudioSeconds int `json:"maxReferenceAudioSeconds,omitempty"`
+	PromptMaxChars           int `json:"promptMaxChars,omitempty"`
 	// TrimStartMs / TrimEndMs 是「裁剪视频」选定的参考视频区间（相对原视频，毫秒）；TrimEndMs 为 0 表示不裁剪。
 	TrimStartMs int64 `json:"trimStartMs,omitempty"`
 	TrimEndMs   int64 `json:"trimEndMs,omitempty"`
@@ -106,6 +113,20 @@ type VideoReplicationParameters struct {
 	Talking bool `json:"talking,omitempty"`
 	// RegionTarget 是分析时识图模型对框选目标的描述，只在服务端生成提示词时临时填入，不随参数保存。
 	RegionTarget string `json:"-"`
+	// Keyframe* 是给元素参考图出图用的系统图片模型（前端按模型能力选好传来）：补充要求换画面元素时，每个新元素先出一张参考图。
+	KeyframeModel          string                       `json:"keyframeModel,omitempty"`
+	KeyframeLogicalModelID string                       `json:"keyframeLogicalModelId,omitempty"`
+	KeyframeChannelID      string                       `json:"keyframeChannelId,omitempty"`
+	KeyframeMaxImages      int                          `json:"keyframeMaxImages,omitempty"`
+	KeyframeParameters     *VideoReplicationImageParams `json:"keyframeParameters,omitempty"`
+}
+
+// VideoReplicationImageParams 是元素参考图出图参数（与工作台图片任务同名字段）。
+type VideoReplicationImageParams struct {
+	Size            string `json:"size"`
+	Quality         string `json:"quality,omitempty"`
+	ImageResolution string `json:"imageResolution,omitempty"`
+	Count           int    `json:"count"`
 }
 
 type VideoReplicationSourceShot struct {
@@ -123,6 +144,7 @@ type VideoReplicationSourceShot struct {
 	Composition        string `json:"composition,omitempty"`
 	Subtitle           string `json:"subtitle,omitempty"`
 	Voiceover          string `json:"voiceover,omitempty"`
+	SpeechDelivery     string `json:"speechDelivery,omitempty"`
 }
 
 type VideoReplicationVideoAnalysis struct {
@@ -140,14 +162,25 @@ type VideoReplicationVideoAnalysis struct {
 }
 
 type VideoReplicationSummary struct {
-	Structure   string `json:"structure,omitempty"`
-	Rhythm      string `json:"rhythm,omitempty"`
-	EditingPace string `json:"editingPace,omitempty"`
-	Style       string `json:"style,omitempty"`
-	Mood        string `json:"mood,omitempty"`
-	Hook        string `json:"hook,omitempty"`
-	Subtitles   string `json:"subtitles,omitempty"`
-	Voiceover   string `json:"voiceover,omitempty"`
+	Delivery    *VideoReplicationSpeechDelivery `json:"delivery,omitempty"`
+	Structure   string                          `json:"structure,omitempty"`
+	Rhythm      string                          `json:"rhythm,omitempty"`
+	EditingPace string                          `json:"editingPace,omitempty"`
+	Style       string                          `json:"style,omitempty"`
+	Mood        string                          `json:"mood,omitempty"`
+	Hook        string                          `json:"hook,omitempty"`
+	Subtitles   string                          `json:"subtitles,omitempty"`
+	Voiceover   string                          `json:"voiceover,omitempty"`
+}
+
+// 表达节奏来自原视频音轨与动作，不作为新商品优惠事实。
+type VideoReplicationSpeechDelivery struct {
+	Mode        string `json:"mode"`
+	Pace        string `json:"pace,omitempty"`
+	Pauses      string `json:"pauses,omitempty"`
+	Emphasis    string `json:"emphasis,omitempty"`
+	Interaction string `json:"interaction,omitempty"`
+	Evidence    string `json:"evidence,omitempty"`
 }
 
 type VideoReplicationRecommendation struct {
@@ -249,6 +282,19 @@ type VideoReplicationShot struct {
 	Packaging bool `json:"packaging,omitempty"`
 	// ProductPresence 是原商品在这一段的存在感（hero / hand / minor / none，来自结构对齐）；为空表示未知。
 	ProductPresence string `json:"productPresence,omitempty"`
+	// SceneEdits 是识图看本段关键帧后，按用户补充要求逐个点名的元素替换（「位置+原元素→新元素」，用「；」分隔）。
+	// 只写一句「所有梨换成香蕉」时，视频模型只改最显眼的几个，没点名的梨原样保留。
+	SceneEdits string `json:"sceneEdits,omitempty"`
+}
+
+// VideoReplicationElement 是一条元素替换：原片里的 From 全片统一换成 To；ResourceID 是 To 的元素参考图（可空，空时只用文字）。
+type VideoReplicationElement struct {
+	ID         string `json:"id"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	ResourceID string `json:"resourceId,omitempty"`
+	// Error 是参考图没生成成功的原因，出图成功后清空。
+	Error string `json:"error,omitempty"`
 }
 
 type VideoReplicationStoryboard struct {
@@ -268,11 +314,18 @@ type VideoReplicationStoryboard struct {
 	// 人物动作表情、镜头、增删物体等，如「梨→苹果；秋日暖黄→清新红绿」）。不为空时逐段提示词不再把原片场景、
 	// 道具与光线列为保持不变，只锁镜头数量、剪辑切点与节奏，其余按清单改。
 	Changes string `json:"changes,omitempty"`
+	// Banned 是按用户补充要求全片都不能再出现的原元素（如「梨、枇杷、梨形小车」）。
+	Banned string `json:"banned,omitempty"`
+	// Elements 是全片统一的元素替换清单（「梨→香蕉」「梨形小车→香蕉形小车」），来自结构对齐。原片编辑时每个新元素
+	// 先自动出一张元素参考图，视频模型以原片为底按「把 @视频1 中的 A 替换成 @图片N 中的 B」逐项替换，镜头构图不动。
+	Elements []VideoReplicationElement `json:"elements,omitempty"`
 	// Knowledge 是规划这份分镜时调用的模型提示词知识库（Seedance / 可灵）；没有调用时为空。
 	Knowledge   string `json:"knowledge,omitempty"`
 	KnowledgeID string `json:"knowledgeId,omitempty"`
 	// VoiceAdapted：口播已按用户商品与补充说明改写（台词、字幕同步更新）。
 	VoiceAdapted bool `json:"voiceAdapted,omitempty"`
+	// SubtitlesAdapted：原片字幕已按新商品改写，包含没有人声的纯字幕片段。
+	SubtitlesAdapted bool `json:"subtitlesAdapted,omitempty"`
 	// Subtitles：参考视频带字幕，成片按新口播生成字幕轨（不让视频模型画字，避免乱码）。
 	Subtitles bool `json:"subtitles,omitempty"`
 }
@@ -373,7 +426,7 @@ func (s *Service) CreateVideoReplicationProject(userID string, input VideoReplic
 	if err := s.requireVideoReplication(); err != nil {
 		return nil, err
 	}
-	project := &model.VideoReplicationProject{ID: newID(), UserID: userID, Title: "爆款复刻", VideoType: "", Status: model.VideoReplicationStatusDraft, ParametersJSON: "{}"}
+	project := &model.VideoReplicationProject{ID: newID(), UserID: userID, Title: "商品视频复刻", VideoType: "", Status: model.VideoReplicationStatusDraft, ParametersJSON: "{}"}
 	if err := applyVideoReplicationInput(project, input); err != nil {
 		return nil, err
 	}
@@ -410,6 +463,7 @@ func applyVideoReplicationInput(project *model.VideoReplicationProject, input Vi
 		}
 		current := videoReplicationParameters(project)
 		params.Auto, params.SegmentSeconds, params.AutoEstimate, params.ConfirmFirst = current.Auto, current.SegmentSeconds, current.AutoEstimate, current.ConfirmFirst
+		params.MaxVideoTasks = current.MaxVideoTasks
 		raw, _ := json.Marshal(params)
 		project.ParametersJSON = string(raw)
 	}
@@ -417,7 +471,19 @@ func applyVideoReplicationInput(project *model.VideoReplicationProject, input Vi
 }
 
 func validateVideoReplicationParameters(params *VideoReplicationParameters) error {
-	for _, value := range []*string{&params.Model, &params.LogicalModelID, &params.ChannelID, &params.ModelLabel, &params.Ratio, &params.Resolution, &params.Camera, &params.Rhythm, &params.Lighting, &params.Mood, &params.ReferenceMode, &params.Transition} {
+	if params.KeyframeMaxImages < 0 || params.KeyframeMaxImages > 20 {
+		return BadAuthRequest("元素参考图模型参数无效")
+	}
+	if p := params.KeyframeParameters; p != nil {
+		p.Count = 1
+		for _, value := range []*string{&p.Size, &p.Quality, &p.ImageResolution} {
+			*value = strings.TrimSpace(*value)
+			if utf8.RuneCountInString(*value) > 32 || strings.Contains(*value, "://") {
+				return BadAuthRequest("元素参考图模型参数无效")
+			}
+		}
+	}
+	for _, value := range []*string{&params.Model, &params.LogicalModelID, &params.ChannelID, &params.ModelLabel, &params.Ratio, &params.Resolution, &params.Camera, &params.Rhythm, &params.Lighting, &params.Mood, &params.ReferenceMode, &params.Transition, &params.KeyframeModel, &params.KeyframeLogicalModelID, &params.KeyframeChannelID} {
 		*value = strings.TrimSpace(*value)
 		if utf8.RuneCountInString(*value) > 120 || strings.Contains(*value, "://") || strings.HasPrefix(strings.ToLower(*value), "data:") {
 			return BadAuthRequest("视频参数格式无效")
@@ -437,6 +503,10 @@ func validateVideoReplicationParameters(params *VideoReplicationParameters) erro
 	if utf8.RuneCountInString(params.SubjectHint) > 10 || strings.Contains(params.SubjectHint, "://") {
 		return BadAuthRequest("商品主体最多 10 个字")
 	}
+	params.ProductName = strings.TrimSpace(params.ProductName)
+	if utf8.RuneCountInString(params.ProductName) > 60 || strings.ContainsFunc(params.ProductName, unicode.IsControl) {
+		return BadAuthRequest("商品名称最多 60 个字，请填写单行名称")
+	}
 	switch params.ReferenceMode {
 	case "", "reference", "first_frame", "none":
 	default:
@@ -450,13 +520,19 @@ func validateVideoReplicationParameters(params *VideoReplicationParameters) erro
 	if err := validateVideoReplicationClip(params); err != nil {
 		return err
 	}
-	if params.MaxReferenceVideos < 0 || params.MaxReferenceVideos > 10 || params.MaxReferenceVideoSeconds < 0 || params.MaxReferenceVideoSeconds > 60 {
+	// 参考素材数量 / 时长 / 提示词字数以后台给模型配的能力为准（开始生成时服务端再按模型配置重写），
+	// 这里只挡明显异常的数值，不再按固定的 10 个视频、3 段音频、20 张图截断管理员的配置。
+	if params.MaxReferenceVideos < 0 || params.MaxReferenceVideos > videoReplicationParamSanityMax || params.MaxReferenceVideoSeconds < 0 || params.MaxReferenceVideoSeconds > 3600 {
 		return BadAuthRequest("参考视频能力参数无效")
 	}
-	if params.MaxReferenceAudios < 0 || params.MaxReferenceAudios > 3 {
+	if params.MaxReferenceAudios < 0 || params.MaxReferenceAudios > videoReplicationParamSanityMax || params.MaxReferenceAudioSeconds < 0 || params.MaxReferenceAudioSeconds > 3600 {
 		return BadAuthRequest("参考音频数量无效")
 	}
-	if params.TargetSeconds < 0 || params.TargetSeconds > 120 || params.MaxReferenceImages < 0 || params.MaxReferenceImages > 20 || len(params.ShotSeconds) > 64 {
+	if params.PromptMaxChars < 0 || params.PromptMaxChars > 200000 {
+		return BadAuthRequest("提示词上限参数无效")
+	}
+	maxSeconds := 600
+	if params.TargetSeconds < 0 || params.TargetSeconds > maxSeconds || params.MaxReferenceImages < 0 || params.MaxReferenceImages > videoReplicationParamSanityMax || len(params.ShotSeconds) > 64 {
 		return BadAuthRequest("视频参数数值无效")
 	}
 	for _, value := range params.ShotSeconds {
@@ -496,7 +572,7 @@ func (s *Service) UpdateVideoReplicationProject(userID, id string, input VideoRe
 
 func videoReplicationNotFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return NotFound("爆款复刻项目不存在")
+		return NotFound("商品视频项目不存在")
 	}
 	return err
 }
@@ -876,11 +952,24 @@ func normalizeVideoReplicationStoryboard(storyboard VideoReplicationStoryboard, 
 		for _, field := range []*string{&shot.ShotSize, &shot.Camera, &shot.Scene, &shot.Action, &shot.ProductFocus, &shot.Lighting, &shot.Mood, &shot.SourceShot} {
 			*field = clip(*field, 300)
 		}
-		shot.Subtitle = clip(shot.Subtitle, 80)
-		shot.Voiceover = clip(shot.Voiceover, 200)
+		if storyboard.VoiceAdapted || storyboard.SubtitlesAdapted {
+			shot.Voiceover = strings.TrimSpace(shot.Voiceover)
+			shot.Subtitle = strings.TrimSpace(shot.Subtitle)
+			if utf8.RuneCountInString(shot.Voiceover) > 2000 || utf8.RuneCountInString(shot.Subtitle) > 2000 {
+				return storyboard, BadAuthRequest(fmt.Sprintf("镜头 %d 的改写口播或字幕过长，请缩短后再保存", index+1))
+			}
+			// 商品改写稿已经按段长校验，不能再截断台词或把字幕截成与声音不同的半句。
+			if shot.Voiceover != "" {
+				shot.Subtitle = shot.Voiceover
+			}
+		} else {
+			shot.Subtitle = clip(shot.Subtitle, 80)
+			shot.Voiceover = clip(shot.Voiceover, 200)
+		}
 		shot.Speaker = clip(shot.Speaker, 24)
 		shot.Prompt = clip(shot.Prompt, 2000)
 		shot.Adaptation = clip(shot.Adaptation, 300)
+		shot.SceneEdits = clip(shot.SceneEdits, 300)
 		shot.ProductPresence = normalizeVideoReplicationPresence(shot.ProductPresence)
 		if shot.Prompt == "" {
 			return storyboard, BadAuthRequest(fmt.Sprintf("镜头 %d 缺少画面描述", index+1))
@@ -896,6 +985,8 @@ func normalizeVideoReplicationStoryboard(storyboard VideoReplicationStoryboard, 
 	storyboard.NewSubject = clip(storyboard.NewSubject, 80)
 	storyboard.ReferenceProps = clip(storyboard.ReferenceProps, 120)
 	storyboard.Changes = clip(storyboard.Changes, 300)
+	storyboard.Banned = clip(storyboard.Banned, 80)
+	storyboard.Elements = normalizeVideoReplicationElements(storyboard.Elements)
 	storyboard.Knowledge = clip(storyboard.Knowledge, 40)
 	if _, ok := videoReplicationKnowledgeSpecByID(storyboard.KnowledgeID); !ok {
 		storyboard.KnowledgeID = ""
@@ -903,7 +994,7 @@ func normalizeVideoReplicationStoryboard(storyboard VideoReplicationStoryboard, 
 	return storyboard, nil
 }
 
-// videoReplicationMinSegmentSeconds 是单段视频的最短时长：多数视频接口（如 Lec API）要求不少于 4 秒。
+// videoReplicationMinSegmentSeconds 是单段视频的最短时长：多数视频接口要求不少于 4 秒。
 const videoReplicationMinSegmentSeconds = 4
 
 // snapVideoReplicationSeconds 把时长取到模型允许的档位；模型档位里有 ≥4 秒的就不取更短的档位。

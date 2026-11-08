@@ -57,6 +57,29 @@ func videoReplicationRunsByShot(t *testing.T, svc *Service, project *model.Video
 	return out
 }
 
+func TestVideoReplicationAcceptanceRejectsUnconfirmedVideoTaskBeforeBilling(t *testing.T) {
+	params := VideoReplicationParameters{Auto: true, MaxVideoTasks: 1, ChannelID: "system", Model: "video", ReferenceMode: "reference", MaxReferenceImages: 1, ShotSeconds: []int{10}}
+	svc, project, db := videoReplicationAcceptanceProject(t, params, 2)
+	_, err := svc.StartVideoReplication(project.UserID, project.ID, VideoReplicationStartInput{SegmentSeconds: 10, MaxVideoTasks: 1})
+	if err == nil || !strings.Contains(err.Error(), "超过已确认的 1 次") {
+		t.Fatalf("start should stop before analysis: %v", err)
+	}
+	if _, err := svc.ConfirmVideoReplicationPlan(project.UserID, project.ID, VideoReplicationPlanInput{Strategy: VideoReplicationStrategySegmented, AudioMode: videoReplicationAudioMute}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.GenerateVideoReplication(project.UserID, project.ID, VideoReplicationGenerateInput{IdempotencyKey: "one-task-cap"}, "")
+	if err == nil || !strings.Contains(err.Error(), "超过已确认的 1 次") {
+		t.Fatalf("saved plan must not bypass task cap: %v", err)
+	}
+	var orders int64
+	if err := db.Model(&model.BillingOrder{}).Count(&orders).Error; err != nil || orders != 0 {
+		t.Fatalf("billing orders = %d, err = %v", orders, err)
+	}
+	if runs := videoReplicationRunsByShot(t, svc, project); len(runs) != 0 {
+		t.Fatalf("video runs created before confirmation: %v", runs)
+	}
+}
+
 func TestVideoReplicationAcceptanceConfirmFirstReusesSavedAnalysis(t *testing.T) {
 	params := VideoReplicationParameters{LogicalModelID: "lm", Model: "m", ReferenceMode: "reference", ShotSeconds: []int{5, 10}, Auto: true, ConfirmFirst: true, SegmentSeconds: 10, KeepOriginalAudio: true}
 	svc, project, db := videoReplicationAcceptanceProject(t, params, 3)
@@ -189,5 +212,50 @@ func TestVideoReplicationAcceptanceRetryOnlyFailedShotAndBudget(t *testing.T) {
 	paused, _ := svc.repo.VideoReplicationProject(project.UserID, project.ID)
 	if !paused.Paused || len(videoReplicationRunsByShot(t, svc, project)["shot_1"]) != before {
 		t.Fatalf("budget pause must not create a run: paused=%v", paused.Paused)
+	}
+}
+
+// 中转站同时收到多段时自己的数据库被锁、拒了第 1 段：上游没建成任务，这段要自动重新提交，
+// 不能把整个项目判失败；其它段还在生成也照样重新提交。
+func TestVideoReplicationAcceptanceResubmitsShotRejectedAtSubmit(t *testing.T) {
+	params := VideoReplicationParameters{LogicalModelID: "lm", Model: "m", ReferenceMode: "reference", ShotSeconds: []int{5, 10}, Auto: true, ConfirmFirst: true}
+	svc, project, db := videoReplicationAcceptanceProject(t, params, 3)
+	if _, err := svc.ConfirmVideoReplicationPlan(project.UserID, project.ID, VideoReplicationPlanInput{Strategy: VideoReplicationStrategySegmented, AudioMode: videoReplicationAudioMute, EstimatedCredits: 30}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Task{ID: "rejected-task", UserID: project.UserID, Type: "canvas_video", Status: model.TaskStatusFailed, Error: "模型服务暂时不可用（HTTP 500）；上游：database is locked (5) (SQLITE_BUSY)"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []model.VideoReplicationShotRun{
+		{ID: newID(), ProjectID: project.ID, UserID: project.UserID, ShotID: "shot_0", Version: 1, IdempotencyKey: "k1:shot_0", Status: model.VideoReplicationRunFailed, TaskID: "rejected-task", Error: "模型服务暂时不可用（HTTP 500）；上游：database is locked (5) (SQLITE_BUSY)"},
+		{ID: newID(), ProjectID: project.ID, UserID: project.UserID, ShotID: "shot_1", Version: 1, IdempotencyKey: "k1:shot_1", Status: model.VideoReplicationRunRunning},
+		{ID: newID(), ProjectID: project.ID, UserID: project.UserID, ShotID: "shot_2", Version: 1, IdempotencyKey: "k1:shot_2", Status: model.VideoReplicationRunRunning},
+	} {
+		if created, err := svc.repo.ReserveVideoReplicationRun(&run); err != nil || !created {
+			t.Fatalf("seed run: %v %v", created, err)
+		}
+		_ = svc.repo.UpdateVideoReplicationRun(run.ID, map[string]any{"status": run.Status, "error": run.Error, "task_id": run.TaskID})
+	}
+	project, _ = svc.repo.VideoReplicationProject(project.UserID, project.ID)
+	_, failure := svc.retryVideoReplicationAuto(project, videoReplicationPlan(project), videoReplicationStoryboard(project), true)
+	runs := videoReplicationRunsByShot(t, svc, project)
+	if len(runs["shot_0"]) != 2 {
+		t.Fatalf("rejected shot must be resubmitted even while others run: %d runs, failure %q", len(runs["shot_0"]), failure)
+	}
+	if strings.Contains(failure, "第 1 段生成失败") {
+		t.Fatalf("a submit rejection must not fail the project: %q", failure)
+	}
+}
+
+func TestVideoReplicationTransientSubmitError(t *testing.T) {
+	for _, message := range []string{"模型服务暂时不可用（HTTP 500）；上游：database is locked (5) (SQLITE_BUSY)", "HTTP 429 Too Many Requests", "read: connection reset by peer"} {
+		if !videoReplicationTransientSubmitError(message) {
+			t.Fatalf("should resubmit: %s", message)
+		}
+	}
+	for _, message := range []string{"请求内容未通过模型服务安全审核", "积分不足", "参数错误：duration must be -1"} {
+		if videoReplicationTransientSubmitError(message) {
+			t.Fatalf("should not resubmit: %s", message)
+		}
 	}
 }

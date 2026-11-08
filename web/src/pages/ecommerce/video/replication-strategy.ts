@@ -37,12 +37,16 @@ export function durationValues(profile: VideoCapabilityConfig | undefined) {
     return Array.from({ length: Math.floor((max - min) / step) + 1 }, (_, index) => min + index * step);
 }
 
-/** 参考图如何进入生成任务：参考图生视频 > 首帧图生视频 > 不支持。 */
+/**
+ * 参考图如何进入生成任务：参考图生视频 > 首帧图生视频 > 不支持。
+ * max 就是后台给这个模型配的每段参考图数（如 Seedance 2.5 配 30 张就是 30），不另设上限；
+ * 后端按元素参考图张数留出名额，其余给商品 / 人物等替换素材。
+ */
 export function replicationReferenceMode(profile: VideoCapabilityConfig | undefined): { mode: ReferenceMode; max: number } {
     if (!profile) return { mode: "none", max: 0 };
     const operations = profile.operations || [];
     const maxImages = profile.references.maxImages || 0;
-    if (maxImages > 0 && operations.includes("reference_to_video")) return { mode: "reference", max: Math.min(maxImages, 4) };
+    if (maxImages > 0 && operations.includes("reference_to_video")) return { mode: "reference", max: maxImages };
     if (maxImages > 0 && (operations.includes("image_to_video") || !operations.length)) return { mode: "first_frame", max: 1 };
     return { mode: "none", max: 0 };
 }
@@ -133,11 +137,12 @@ export function segmentSecondOptions(allowed: number[]) {
 }
 
 /**
- * 预估分段：与服务端一致按单段上限切分，末尾不足 4 秒的部分并入前一段。
- * 服务端实际在参考视频自己的镜头切点处切，段数可能比这里多一两段，仅用于预估积分。
+ * 按单段上限预估生成次数，服务端可在同样的次数内调整切点。
  */
-export function estimateSegments(totalMs: number, segmentSeconds: number) {
-    const total = Math.max(4, Math.round(totalMs / 1000));
+export function estimateSegments(totalMs: number, segmentSeconds: number, allowed: number[] = []) {
+    // 与服务端一致：整片只比单段上限多出不到 1 秒时裁尾成一段。
+    const overMs = totalMs - segmentSeconds * 1000;
+    const total = overMs > 0 && overMs <= 1000 ? segmentSeconds : Math.max(4, Math.round(totalMs / 1000));
     const seconds: number[] = [];
     let left = total;
     while (left > 0) {
@@ -153,5 +158,6 @@ export function estimateSegments(totalMs: number, segmentSeconds: number) {
         seconds.push(segmentSeconds);
         left = rest;
     }
-    return seconds;
+    const options = allowed.filter((value) => value >= 4);
+    return seconds.map((value) => snapToDuration(value, options.length ? options : allowed));
 }

@@ -64,6 +64,9 @@ func validateVideoReplicationClip(params *VideoReplicationParameters) error {
 	if params.RegionFrameMs < 0 || params.RegionFrameMs > videoReplicationMaxSourceMs {
 		return BadAuthRequest("框选画面时间无效")
 	}
+	if videoReplicationProductLocked(*params) && videoReplicationTrimmed(*params) && (params.RegionFrameMs < params.TrimStartMs || params.RegionFrameMs >= params.TrimEndMs) {
+		return BadAuthRequest("商品框选画面不在裁剪区间内，请在保留的视频片段里重新框选")
+	}
 	if len(params.Regions) == 0 {
 		params.RegionFrameMs = 0
 	}
@@ -92,6 +95,9 @@ func videoReplicationEffectiveDurationMs(params VideoReplicationParameters, sour
 func videoReplicationClipKey(params VideoReplicationParameters) string {
 	parts := []string{fmt.Sprintf("trim:%d-%d", params.TrimStartMs, params.TrimEndMs)}
 	if len(params.Regions) > 0 {
+		if videoReplicationProductLocked(params) {
+			parts = append(parts, "product-lock:v2")
+		}
 		parts = append(parts, fmt.Sprintf("frame:%d", params.RegionFrameMs))
 		for _, region := range params.Regions {
 			parts = append(parts, fmt.Sprintf("%.3f,%.3f,%.3f,%.3f", region.X, region.Y, region.W, region.H))
@@ -143,15 +149,22 @@ func videoReplicationRegionPosition(region VideoReplicationRegion) string {
 }
 
 // describeVideoReplicationRegions 让识图模型说出红框里的目标，返回写进提示词的一句话；frame 是画好红框的 JPEG。
-func (s *Service) describeVideoReplicationRegions(ctx context.Context, cfg ecommerceProviderConfig, projectID, frame string, params VideoReplicationParameters) string {
+func (s *Service) describeVideoReplicationRegions(ctx context.Context, cfg ecommerceProviderConfig, projectID, frame string, params VideoReplicationParameters) (string, error) {
 	positions := make([]string, 0, len(params.Regions))
 	for index, region := range params.Regions {
-		positions = append(positions, fmt.Sprintf("框%d 在%s", index+1, videoReplicationRegionPosition(region)))
+		position := fmt.Sprintf("框%d 在%s", index+1, videoReplicationRegionPosition(region))
+		if videoReplicationProductLocked(params) {
+			position += fmt.Sprintf("，归一化区域 x=%.3f y=%.3f w=%.3f h=%.3f", region.X, region.Y, region.W, region.H)
+		}
+		positions = append(positions, position)
 	}
 	fallback := fmt.Sprintf("用户在原视频画面上框选了 %d 个要替换的目标（%s）", len(params.Regions), strings.Join(positions, "，"))
 	data, err := os.ReadFile(frame)
 	if err != nil {
-		return fallback
+		if videoReplicationProductLocked(params) {
+			return "", fmt.Errorf("读取商品框选定位图失败：%w", err)
+		}
+		return fallback, nil
 	}
 	person := params.ReplaceMode == "precise-person" || params.ReplaceMode == "model" || params.ReplaceMode == "face"
 	kind := "商品 / 物品"
@@ -163,31 +176,51 @@ func (s *Service) describeVideoReplicationRegions(ctx context.Context, cfg ecomm
 请逐个说出每个红框里是什么，用 8-20 字的外观描述，便于在视频的其他画面里认出同一个目标（例如「左手拿着的粉色洗发水瓶」「穿棕色夹克的长发女生」）。
 再用一句话说明框外有哪些相似的%s需要保持不变（没有则为空）。
 输出 JSON：{"targets":["框1里的目标","框2里的目标"],"keep":"框外保持不变的相似目标"}`, kind, len(params.Regions), strings.Join(positions, "，"), kind)
-	var result struct {
-		Targets []string `json:"targets"`
-		Keep    string   `json:"keep"`
+	if videoReplicationProductLocked(params) {
+		prompt += "\n每个框必须对应一个 targets 项，保持框的顺序，不能合并或漏掉；看不清或无法确定的框写空串，禁止猜测。"
 	}
+	var result videoReplicationRegionDescription
 	images := []string{"data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data)}
 	if err := s.videoReplicationChatJSON(ctx, cfg, "region", projectID, system, prompt, images, nil, &result); err != nil {
-		return fallback
+		if videoReplicationProductLocked(params) {
+			return "", fmt.Errorf("商品框选识别失败，请重试或选择目标清晰的一帧：%w", err)
+		}
+		return fallback, nil
+	}
+	return videoReplicationDescribeRegionsResult(params, result, positions, fallback)
+}
+
+type videoReplicationRegionDescription struct {
+	Targets []string `json:"targets"`
+	Keep    string   `json:"keep"`
+}
+
+func videoReplicationDescribeRegionsResult(params VideoReplicationParameters, result videoReplicationRegionDescription, positions []string, fallback string) (string, error) {
+	strict := videoReplicationProductLocked(params)
+	if strict && len(result.Targets) != len(params.Regions) {
+		return "", BadAuthRequest("没有完整识别全部框选商品，请选择目标清晰的一帧重新框选")
 	}
 	targets := []string{}
 	for index, target := range result.Targets {
 		if index >= len(params.Regions) {
 			break
 		}
-		if target = strings.TrimSpace(target); target != "" && !strings.Contains(target, "://") {
+		target = strings.TrimSpace(target)
+		if strict && (target == "" || strings.Contains(target, "://") || videoReplicationNoneText(target) || strings.Contains(target, "无法识别") || strings.Contains(target, "无法确定") || strings.Contains(target, "无法确认") || strings.Contains(target, "看不清") || strings.Contains(target, "不确定")) {
+			return "", BadAuthRequest(fmt.Sprintf("无法确定第 %d 个框里的商品，请选择目标清晰的一帧重新框选", index+1))
+		}
+		if target != "" && !strings.Contains(target, "://") {
 			targets = append(targets, fmt.Sprintf("「%s」（%s）", videoReplicationClipRunes(target, 40), positions[index]))
 		}
 	}
 	if len(targets) == 0 {
-		return fallback
+		return fallback, nil
 	}
 	text := fmt.Sprintf("用户在原视频里框选了 %d 个要替换的目标：%s", len(targets), strings.Join(targets, "、"))
 	if keep := strings.TrimSpace(result.Keep); keep != "" && utf8.RuneCountInString(keep) <= 80 && !strings.Contains(keep, "://") {
 		text += "；" + keep + "保持原样"
 	}
-	return text
+	return text, nil
 }
 
 // videoReplicationRegionRule 是写进每段画面提示词的框选约束。
@@ -244,24 +277,23 @@ func (s *Service) videoReplicationEffectiveDurationAllowed(userID, projectID str
 
 // videoReplicationAnalysisDigest 是视频理解结果的复用键：素材之外还要看裁剪区间与框选。
 func videoReplicationAnalysisDigest(assets []model.VideoReplicationAsset, params VideoReplicationParameters) string {
+	media := videoReplicationMediaDigest(assets) + "~speech-v1"
 	key := videoReplicationClipKey(params)
-	if key == "trim:0-0" {
-		return videoReplicationMediaDigest(assets)
+	if params.ProductName != "" {
+		return media + "~" + key + "~name:" + params.ProductName
 	}
-	return videoReplicationMediaDigest(assets) + "~" + key
+	if key == "trim:0-0" {
+		return media
+	}
+	return media + "~" + key
 }
 
 // videoReplicationWithLipSyncPrompt：口播视频保留原声时，成片直接叠加原音轨，画面里的人物口型要对上原台词。
-func videoReplicationWithLipSyncPrompt(prompt, lines string) string {
+func videoReplicationWithLipSyncPrompt(prompt, lines string, budget videoReplicationPromptBudget) string {
 	lines = strings.TrimSpace(lines)
 	if lines == "" {
-		return prompt
+		return budget.clip(prompt)
 	}
 	suffix := "口型：成片会直接使用原视频的声音，人物口型与原台词「" + videoReplicationClipRunes(lines, 400) + "」同步，说话节奏与原视频一致；画面不要生成新的人声。"
-	room := 3900 - len(suffix) - 1
-	for len(prompt) > room && prompt != "" {
-		_, size := utf8.DecodeLastRuneInString(prompt)
-		prompt = prompt[:len(prompt)-size]
-	}
-	return prompt + "\n" + suffix
+	return budget.without(suffix).clip(prompt) + "\n" + suffix
 }

@@ -19,7 +19,7 @@ import (
 	"yingce/backend/internal/model"
 )
 
-// 爆款复刻 2.0 的双引擎：
+// 商品视频复刻 2.0 的双引擎：
 //   - native（原生直出）：一个视频生成任务直接输出完整视频，不拆分、不拼接、不剪辑；FFmpeg 只做 ffprobe/黑场等只读检查。
 //   - segmented（智能分段）：按分镜生成多段，FFmpeg 时间线渲染合成完整视频。
 // 任何付费调用都必须基于用户确认过的方案（任务数、模型、预算）；方案对应的分镜或参数变化后需要重新确认。
@@ -140,6 +140,15 @@ func videoReplicationOnCameraSpeech(analysis *VideoReplicationAnalysis) bool {
 	return analysis != nil && analysis.Voice != nil && (analysis.Voice.Type == "on_camera" || analysis.Voice.Type == "dialogue")
 }
 
+// 原生直出直接发布模型资源；只有 TTS 方案会实际进入后期字幕合成。
+func videoReplicationValidateNativeSubtitles(plan *VideoReplicationPlan, storyboard VideoReplicationStoryboard, params VideoReplicationParameters) error {
+	adaptedSubtitles := storyboard.SubtitlesAdapted || (storyboard.VoiceAdapted && (storyboard.Subtitles || params.Subtitles))
+	if plan.Strategy == VideoReplicationStrategyNative && plan.AudioMode != videoReplicationAudioTTS && adaptedSubtitles {
+		return BadAuthRequest("原生直出不能叠加改写后的商品字幕，请选择智能分段后重新确认；已开启「禁止剪辑拼接」时需先取消，尚未提交视频生成")
+	}
+	return nil
+}
+
 // buildVideoReplicationPlan 根据分镜、参数与用户选择计算真实任务计划；不信任前端传入的任务数。
 func buildVideoReplicationPlan(project *model.VideoReplicationProject, input VideoReplicationPlanInput) (*VideoReplicationPlan, error) {
 	storyboard := videoReplicationStoryboard(project)
@@ -159,6 +168,15 @@ func buildVideoReplicationPlan(project *model.VideoReplicationProject, input Vid
 		_ = json.Unmarshal([]byte(project.AnalysisJSON), analysis)
 	}
 	plan := &VideoReplicationPlan{Strategy: input.Strategy, Model: params.Model, ModelLabel: params.ModelLabel, AudioMode: input.AudioMode, VoiceAuthorized: input.VoiceAuthorized, EstimatedCredits: input.EstimatedCredits, BudgetCredits: input.BudgetCredits, StoryboardRevision: project.StoryboardRevision, NoSplice: input.NoSplice, Instrumental: input.Instrumental, SourceVoice: input.SourceVoice, VoiceHint: input.VoiceHint, SpeakLines: input.SpeakLines, Digest: videoReplicationDigest(project), ConfirmedAt: time.Now()}
+	if err := videoReplicationValidateNativeSubtitles(plan, *storyboard, params); err != nil {
+		return nil, err
+	}
+	if storyboard.VoiceAdapted {
+		if plan.AudioMode == videoReplicationAudioOriginal {
+			return nil, BadAuthRequest("商品口播已经改写，不能用原视频旧人声覆盖新台词；请选择模型原生音频、AI 配音或静音")
+		}
+		plan.SpeakLines = true
+	}
 	if input.NoSplice && input.Strategy != VideoReplicationStrategyNative {
 		return nil, BadAuthRequest("已选择禁止剪辑拼接，只能使用原生直出；请换用支持参考视频时长的模型，或取消「禁止剪辑拼接」")
 	}
@@ -376,7 +394,7 @@ func videoReplicationNativePrompt(videoType string, params VideoReplicationParam
 	}
 	tail := videoReplicationShotPrompt(videoType, params, VideoReplicationShot{}, brief, references)
 	b.WriteString("\n" + strings.TrimSpace(tail))
-	return clipText(b.String(), 3800)
+	return videoReplicationPromptBudgetFor(params).clip(b.String())
 }
 
 var blackDurationPattern = regexp.MustCompile(`black_duration:([0-9.]+)`)
@@ -526,4 +544,13 @@ func videoReplicationReferenceSeconds(analysis *VideoReplicationAnalysis) int {
 		return int(math.Round(float64(analysis.Videos[0].DurationMs) / 1000))
 	}
 	return 0
+}
+
+// videoReplicationWithDetectedTalking：原片识别出有人对镜说话（口播 / 对话）时按口播处理，用户没勾「是否口播视频」也一样。
+// 否则换了人、换了声音后提示词里没有口型要求，新面孔的嘴型和台词对不上，一眼假。
+func videoReplicationWithDetectedTalking(params VideoReplicationParameters, analysis *VideoReplicationAnalysis) VideoReplicationParameters {
+	if !params.Talking && videoReplicationOnCameraSpeech(analysis) {
+		params.Talking = true
+	}
+	return params
 }

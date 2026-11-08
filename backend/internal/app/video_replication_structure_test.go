@@ -60,7 +60,7 @@ func TestVideoReplicationEditPromptUsesStructurePackagingAndRemovesSubtitles(t *
 	}
 	// 没有结构对齐结果时退回通用规则，仍然换掉原包装。
 	plain := videoReplicationEditPrompt("product", VideoReplicationParameters{}, VideoReplicationShot{}, VideoReplicationStoryboard{}, "", references[:1])
-	if !strings.Contains(plain, "展示新商品对应的部位或整机") || !strings.Contains(plain, "素白包装盒") {
+	if !strings.Contains(plain, "展示新商品对应的部位或整机") || !strings.Contains(plain, "同类无品牌包装（袋仍是袋，盒仍是盒）") {
 		t.Fatalf("fallback prompt:\n%s", plain)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"yingce/backend/internal/repository"
 )
 
-// 爆款复刻后台设置：管理员指定视频理解（识图）与分镜策划模型、开放给用户的视频生成模型及其可选参数。
+// 电商视频 Agent 后台设置：管理员指定视频理解（识图）与分镜策划模型、开放给用户的视频生成模型及其可选参数。
 // 视频时长不在这里配置，也不由用户选择：由参考视频真实时长与所选模型的单次上限自动决定原生直出或智能分段。
 
 const videoReplicationSettingKey = "video_replication_setting"
@@ -38,14 +39,15 @@ type VideoReplicationSetting struct {
 	Vision      *EcommerceAgentModelRef      `json:"vision,omitempty"`
 	Planning    *EcommerceAgentModelRef      `json:"planning,omitempty"`
 	VideoModels []VideoReplicationVideoModel `json:"videoModels"`
+	// 保留空白名单，避免最后一个模型下架后自动开放整个目录。
+	RestrictVideoModels bool `json:"restrictVideoModels,omitempty"`
 	// ASR：mode=vision 用视频理解模型听写音轨；mode=model 用后台指定的语音识别模型（OpenAI 兼容 /audio/transcriptions）；mode=env 或空用服务器 whisper 服务。
 	ASR *VideoReplicationASRSetting `json:"asr,omitempty"`
 	// TTS：配音 / 试听使用的语音合成模型与可选音色（前台只展示音色名与说明，不展示模型）。
 	TTS *VideoReplicationTTSSetting `json:"tts,omitempty"`
-	// MaxReferenceSeconds 是参考视频时长上限（4–120 秒）；0 表示默认 120 秒。
+	// MaxReferenceSeconds 是参考视频时长上限（4–600 秒）；0 表示默认 120 秒。
 	MaxReferenceSeconds int `json:"maxReferenceSeconds,omitempty"`
-	// DisabledKinds 是电商 Agent 商品视频里关闭的替换类型（replaceMode），前台隐藏、后端拒绝提交；
-	// "dance" 表示关闭跳舞复刻。
+	// DisabledKinds 是电商 Agent 商品视频里关闭的替换类型（replaceMode），前台隐藏、后端拒绝提交。
 	DisabledKinds []string `json:"disabledKinds,omitempty"`
 	// Knowledge 是 Seedance / 可灵模型提示词知识库的开关与自定义内容；没保存过的知识库默认开启、用内置内容。
 	Knowledge []VideoReplicationKnowledgeBase `json:"knowledge,omitempty"`
@@ -151,57 +153,114 @@ func (s *Service) videoReplicationSetting() (VideoReplicationSetting, error) {
 	}
 	var setting VideoReplicationSetting
 	if err := json.Unmarshal([]byte(row.ValueJSON), &setting); err != nil {
-		return VideoReplicationSetting{}, errors.New("爆款复刻设置无效")
+		return VideoReplicationSetting{}, errors.New("商品视频复刻设置无效")
 	}
 	if setting.VideoModels == nil {
 		setting.VideoModels = []VideoReplicationVideoModel{}
 	}
-	return setting, nil
+	err = s.reconcileVideoReplicationModels(&setting, false)
+	return setting, err
 }
 
 func videoReplicationRefEmpty(ref *EcommerceAgentModelRef) bool {
 	return ref == nil || (strings.TrimSpace(ref.LogicalModelID) == "" && strings.TrimSpace(ref.ChannelModelID) == "")
 }
 
-// normalizeVideoReplicationRef 只接受逻辑模型或渠道模型行 ID；渠道与模型键从目录回填，不信任前端。
-func (s *Service) normalizeVideoReplicationRef(ref EcommerceAgentModelRef, capability string) (EcommerceAgentModelRef, error) {
-	if id := strings.TrimSpace(ref.LogicalModelID); id != "" {
-		return EcommerceAgentModelRef{LogicalModelID: id}, nil
+// reconcileVideoReplicationModels derives effective settings from the current
+// catalog. Reads leave storage untouched. Saves persist only usable references.
+func (s *Service) reconcileVideoReplicationModels(setting *VideoReplicationSetting, saving bool) error {
+	type selection struct {
+		ref        *EcommerceAgentModelRef
+		capability string
+		label      string
 	}
-	id := strings.TrimSpace(ref.ChannelModelID)
-	if id == "" {
-		return EcommerceAgentModelRef{}, BadAuthRequest("请选择模型")
+	selections := []selection{{setting.Vision, "text", "视频理解模型"}, {setting.Planning, "text", "分镜策划模型"}}
+	if setting.ASR != nil && strings.TrimSpace(setting.ASR.Mode) == "model" {
+		if saving && videoReplicationRefEmpty(&setting.ASR.Model) {
+			return BadAuthRequest("请选择语音识别模型")
+		}
+		selections = append(selections, selection{&setting.ASR.Model, "", "语音识别模型"})
 	}
-	selected, err := s.repo.ChannelModel(id)
-	if err != nil || !selected.Enabled || selected.DeletedAt.Valid {
-		return EcommerceAgentModelRef{}, BadAuthRequest("所选渠道模型不存在或已停用")
+	if setting.TTS != nil {
+		selections = append(selections, selection{&setting.TTS.Model, "audio", "配音模型"})
 	}
-	if capability != "" && selected.Capability != capability {
-		return EcommerceAgentModelRef{}, BadAuthRequest("所选模型能力不匹配")
+	for i := range setting.VideoModels {
+		ref := &setting.VideoModels[i].EcommerceAgentModelRef
+		if saving && videoReplicationRefEmpty(ref) {
+			return BadAuthRequest("请选择视频生成模型")
+		}
+		selections = append(selections, selection{ref, "video", "视频生成模型"})
 	}
-	return EcommerceAgentModelRef{ChannelModelID: selected.ID, ChannelID: selected.ChannelID, ModelKey: selected.ModelKey}, nil
-}
-
-// videoReplicationRefStale 判断配置里引用的渠道模型是否已被删除或停用（逻辑模型引用不会失效）。
-func (s *Service) videoReplicationRefStale(ref EcommerceAgentModelRef) bool {
-	if strings.TrimSpace(ref.LogicalModelID) != "" {
-		return false
+	var channelIDs []string
+	var logical *routeCatalogSnapshot
+	for _, item := range selections {
+		if item.ref == nil {
+			continue
+		}
+		if strings.TrimSpace(item.ref.LogicalModelID) != "" {
+			if logical == nil {
+				var err error
+				logical, err = s.routeCatalogSnapshot()
+				if err != nil {
+					return err
+				}
+			}
+		} else if id := strings.TrimSpace(item.ref.ChannelModelID); id != "" {
+			channelIDs = append(channelIDs, id)
+		}
 	}
-	id := strings.TrimSpace(ref.ChannelModelID)
-	if id == "" {
-		return true
+	models, err := s.repo.EnabledSystemChannelModelsByIDs(channelIDs)
+	if err != nil {
+		return err
 	}
-	selected, err := s.repo.ChannelModel(id)
-	return err != nil || !selected.Enabled || selected.DeletedAt.Valid
-}
-
-// videoReplicationRefError 在模型校验错误前标明是哪一项设置、哪个模型，方便管理员定位要改的那一行。
-func videoReplicationRefError(field string, ref EcommerceAgentModelRef, err error) error {
-	name := firstNonEmpty(strings.TrimSpace(ref.ModelKey), strings.TrimSpace(ref.ChannelModelID), strings.TrimSpace(ref.LogicalModelID))
-	if name != "" {
-		field += "「" + name + "」"
+	byID := make(map[string]model.ChannelModel, len(models))
+	for _, item := range models {
+		byID[item.ID] = item
 	}
-	return BadAuthRequest(field + "：" + err.Error() + "，请删除这一项或换成其他模型后再保存")
+	for _, item := range selections {
+		if videoReplicationRefEmpty(item.ref) {
+			continue
+		}
+		var ref EcommerceAgentModelRef
+		var capability string
+		if id := strings.TrimSpace(item.ref.LogicalModelID); id != "" {
+			candidate := logical.Models[id]
+			for _, route := range candidate.Routes {
+				if route.Route.Enabled && route.Route.Weight > 0 {
+					ref = EcommerceAgentModelRef{LogicalModelID: id}
+					capability = candidate.Model.Capability
+					break
+				}
+			}
+		} else if candidate, ok := byID[strings.TrimSpace(item.ref.ChannelModelID)]; ok {
+			ref = EcommerceAgentModelRef{ChannelModelID: candidate.ID, ChannelID: candidate.ChannelID, ModelKey: candidate.ModelKey}
+			capability = candidate.Capability
+		}
+		if !videoReplicationRefEmpty(&ref) && item.capability != "" && item.capability != capability {
+			if saving {
+				return BadAuthRequest(item.label + "的模型能力不匹配，请重新选择")
+			}
+			ref = EcommerceAgentModelRef{}
+		}
+		*item.ref = ref
+	}
+	if videoReplicationRefEmpty(setting.Vision) {
+		setting.Vision = nil
+	}
+	if videoReplicationRefEmpty(setting.Planning) {
+		setting.Planning = nil
+	}
+	if setting.TTS != nil && videoReplicationRefEmpty(&setting.TTS.Model) {
+		setting.TTS = nil
+	}
+	if setting.ASR != nil && strings.TrimSpace(setting.ASR.Mode) == "model" && videoReplicationRefEmpty(&setting.ASR.Model) {
+		setting.ASR = &VideoReplicationASRSetting{Mode: "env", Language: setting.ASR.Language}
+	}
+	setting.RestrictVideoModels = setting.RestrictVideoModels || len(setting.VideoModels) > 0
+	setting.VideoModels = slices.DeleteFunc(setting.VideoModels, func(item VideoReplicationVideoModel) bool {
+		return videoReplicationRefEmpty(&item.EcommerceAgentModelRef)
+	})
+	return nil
 }
 
 func (s *Service) AdminVideoReplicationStatus(actor *model.User) (*VideoReplicationAdminStatus, error) {
@@ -217,7 +276,7 @@ func (s *Service) AdminVideoReplicationStatus(actor *model.User) (*VideoReplicat
 		checks = append(checks, VideoReplicationAdminCheck{Name: name, OK: ok, Detail: detail})
 	}
 	if err := s.RequireFeature(FeatureVideoWorkbench); err != nil {
-		add("影棚视频功能开关", false, "功能开关里「视频」未开放，用户看不到爆款复刻")
+		add("影棚视频功能开关", false, "功能开关里「视频」未开放，用户看不到商品视频复刻")
 	} else {
 		add("影棚视频功能开关", true, "已开放")
 	}
@@ -270,8 +329,10 @@ func (s *Service) AdminVideoReplicationStatus(actor *model.User) (*VideoReplicat
 			enabled++
 		}
 	}
-	if enabled == 0 {
+	if !setting.RestrictVideoModels {
 		add("视频生成模型", true, "未限定：用户可选全部系统视频模型")
+	} else if enabled == 0 {
+		add("视频生成模型", false, "未开放模型，请在「视频生成模型」添加或启用模型")
 	} else {
 		add("视频生成模型", true, fmt.Sprintf("已开放 %d 个模型", enabled))
 	}
@@ -289,23 +350,18 @@ func (s *Service) UpdateVideoReplicationSetting(actor *model.User, input VideoRe
 	if err := s.RequireAdmin(actor); err != nil {
 		return nil, err
 	}
-	next := VideoReplicationSetting{VideoModels: []VideoReplicationVideoModel{}, UpdatedAt: time.Now(), UpdatedBy: actor.ID}
-	for _, item := range []struct {
-		label  string
-		source *EcommerceAgentModelRef
-		target **EcommerceAgentModelRef
-	}{{"视频理解模型", input.Vision, &next.Vision}, {"分镜策划模型", input.Planning, &next.Planning}} {
-		if videoReplicationRefEmpty(item.source) {
-			continue
-		}
-		ref, err := s.normalizeVideoReplicationRef(*item.source, "text")
-		if err != nil {
-			return nil, videoReplicationRefError(item.label, *item.source, err)
-		}
-		*item.target = &ref
+	if len(input.VideoModels) > 30 {
+		return nil, BadAuthRequest("视频模型最多 30 个")
 	}
-	if input.MaxReferenceSeconds != 0 && (input.MaxReferenceSeconds < 4 || input.MaxReferenceSeconds > 120) {
-		return nil, BadAuthRequest("参考视频时长上限需为 4–120 秒")
+	if err := s.reconcileVideoReplicationModels(&input, true); err != nil {
+		return nil, err
+	}
+	next := VideoReplicationSetting{
+		Vision: input.Vision, Planning: input.Planning, RestrictVideoModels: input.RestrictVideoModels,
+		VideoModels: []VideoReplicationVideoModel{}, UpdatedAt: time.Now(), UpdatedBy: actor.ID,
+	}
+	if input.MaxReferenceSeconds != 0 && (input.MaxReferenceSeconds < 4 || input.MaxReferenceSeconds > 600) {
+		return nil, BadAuthRequest("参考视频时长上限需为 4–600 秒")
 	}
 	next.MaxReferenceSeconds = input.MaxReferenceSeconds
 	// 知识库：请求里没带（旧页面只保存其他设置）时保留已保存的开关与内容。
@@ -322,7 +378,7 @@ func (s *Service) UpdateVideoReplicationSetting(actor *model.User, input VideoRe
 	}
 	for _, kind := range input.DisabledKinds {
 		switch kind {
-		case "model", "clothing", "face", "background", "product", "precise-product", "precise-person", "combination", "dance":
+		case "model", "clothing", "face", "background", "product", "precise-product", "precise-person", "combination":
 			if !containsString(next.DisabledKinds, kind) {
 				next.DisabledKinds = append(next.DisabledKinds, kind)
 			}
@@ -337,22 +393,14 @@ func (s *Service) UpdateVideoReplicationSetting(actor *model.User, input VideoRe
 			asr.Mode = "env"
 		case videoReplicationASRModeVision:
 		case "model":
-			ref, err := s.normalizeVideoReplicationRef(input.ASR.Model, "")
-			if err != nil {
-				return nil, videoReplicationRefError("语音识别模型", input.ASR.Model, err)
-			}
-			asr.Model = ref
+			asr.Model = input.ASR.Model
 		default:
 			return nil, BadAuthRequest("语音识别方式无效")
 		}
 		next.ASR = &asr
 	}
-	if input.TTS != nil && !videoReplicationRefEmpty(&input.TTS.Model) {
-		ref, err := s.normalizeVideoReplicationRef(input.TTS.Model, "audio")
-		if err != nil {
-			return nil, videoReplicationRefError("配音模型（TTS）", input.TTS.Model, err)
-		}
-		tts := VideoReplicationTTSSetting{Model: ref, Voices: []VideoReplicationVoiceOption{}, Format: strings.TrimSpace(input.TTS.Format)}
+	if input.TTS != nil {
+		tts := VideoReplicationTTSSetting{Model: input.TTS.Model, Voices: []VideoReplicationVoiceOption{}, Format: strings.TrimSpace(input.TTS.Format)}
 		if tts.Format != "" && tts.Format != "mp3" && tts.Format != "wav" {
 			return nil, BadAuthRequest("配音格式只支持 mp3 / wav")
 		}
@@ -375,9 +423,6 @@ func (s *Service) UpdateVideoReplicationSetting(actor *model.User, input VideoRe
 		}
 		next.TTS = &tts
 	}
-	if len(input.VideoModels) > 30 {
-		return nil, BadAuthRequest("视频模型最多 30 个")
-	}
 	seen := map[string]bool{}
 	clean := func(values []string) []string {
 		result := []string{}
@@ -390,20 +435,12 @@ func (s *Service) UpdateVideoReplicationSetting(actor *model.User, input VideoRe
 		return result
 	}
 	for _, item := range input.VideoModels {
-		ref, err := s.normalizeVideoReplicationRef(item.EcommerceAgentModelRef, "video")
-		if err != nil {
-			// 已关闭的一行指向的渠道模型后来被停用或下架：前台本来就看不到它，保存时直接移除，不挡住整页其他设置的保存。
-			if !item.Enabled && s.videoReplicationRefStale(item.EcommerceAgentModelRef) {
-				continue
-			}
-			return nil, videoReplicationRefError("视频生成模型", item.EcommerceAgentModelRef, err)
-		}
-		identity := ref.LogicalModelID + "|" + ref.ChannelModelID
+		identity := item.LogicalModelID + "|" + item.ChannelModelID
 		if seen[identity] {
 			return nil, BadAuthRequest("视频模型重复")
 		}
 		seen[identity] = true
-		model := VideoReplicationVideoModel{EcommerceAgentModelRef: ref, Label: clipText(strings.TrimSpace(item.Label), 60), Enabled: item.Enabled, Ratios: clean(item.Ratios), Resolutions: clean(item.Resolutions), DefaultRatio: strings.TrimSpace(item.DefaultRatio), DefaultResolution: strings.TrimSpace(item.DefaultResolution), GenerateAudio: item.GenerateAudio, AllowAudioToggle: item.AllowAudioToggle}
+		model := VideoReplicationVideoModel{EcommerceAgentModelRef: item.EcommerceAgentModelRef, Label: clipText(strings.TrimSpace(item.Label), 60), Enabled: item.Enabled, Ratios: clean(item.Ratios), Resolutions: clean(item.Resolutions), DefaultRatio: strings.TrimSpace(item.DefaultRatio), DefaultResolution: strings.TrimSpace(item.DefaultResolution), GenerateAudio: item.GenerateAudio, AllowAudioToggle: item.AllowAudioToggle}
 		if model.DefaultRatio != "" && len(model.Ratios) > 0 && !containsString(model.Ratios, model.DefaultRatio) {
 			return nil, BadAuthRequest("默认比例必须在开放的比例内")
 		}
@@ -437,15 +474,15 @@ func (s *Service) VideoReplicationConfig() (*VideoReplicationPublicConfig, error
 			config.VideoModels = append(config.VideoModels, item)
 		}
 	}
-	config.RestrictVideoModels = len(config.VideoModels) > 0
+	config.RestrictVideoModels = setting.RestrictVideoModels
 	return config, nil
 }
 
 func videoReplicationMaxReferenceSeconds(setting VideoReplicationSetting) int {
-	if setting.MaxReferenceSeconds >= 4 && setting.MaxReferenceSeconds <= 120 {
+	if setting.MaxReferenceSeconds >= 4 && setting.MaxReferenceSeconds <= 600 {
 		return setting.MaxReferenceSeconds
 	}
-	return int(videoReplicationMaxDurationMs / 1000)
+	return 120
 }
 
 // videoReplicationModelAllowed 校验用户提交的视频模型是否在管理员开放的范围与参数内（未限定时全部允许）。
@@ -454,12 +491,10 @@ func (s *Service) videoReplicationModelAllowed(params VideoReplicationParameters
 	if err != nil {
 		return err
 	}
-	restricted := false
 	for _, item := range setting.VideoModels {
 		if !item.Enabled {
 			continue
 		}
-		restricted = true
 		match := (item.LogicalModelID != "" && item.LogicalModelID == params.LogicalModelID) ||
 			(item.LogicalModelID == "" && params.LogicalModelID == "" && item.ChannelID == params.ChannelID && strings.TrimPrefix(item.ModelKey, "models/") == strings.TrimPrefix(params.Model, "models/"))
 		if !match {
@@ -476,8 +511,8 @@ func (s *Service) videoReplicationModelAllowed(params VideoReplicationParameters
 		}
 		return nil
 	}
-	if restricted {
-		return BadAuthRequest("所选视频模型未在爆款复刻后台开放，请重新选择")
+	if setting.RestrictVideoModels {
+		return BadAuthRequest("所选视频模型未在电商视频 Agent 后台开放，请重新选择")
 	}
 	return nil
 }

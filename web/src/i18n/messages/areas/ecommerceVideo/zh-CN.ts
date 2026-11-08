@@ -5,11 +5,10 @@ export const zhCN = {
         clothing: { label: "服饰", hint: "上传服装 / 服饰图", front: "正面图", back: "反面图", frontFirst: "请先上传正面图", compare: "服饰穿到视频人物身上" },
         face: { label: "人脸", hint: "上传清晰人脸大头贴", slot: "人脸图" },
         background: { label: "换背景", hint: "上传要替换成的背景图", slot: "背景图" },
-        product: { label: "商品", hint: "上传商品主图，可补多角度图", slot: "商品图", compare: "商品替换到视频物品上", detailSlot: "细节/拆解图", packagingSlot: "包装图" },
+        product: { label: "商品", hint: "上传商品主图，可补多角度图", slot: "商品图", compare: "商品替换到视频物品上", detailSlot: "细节 / 参数表", packagingSlot: "包装图" },
         preciseProduct: { label: "精准商品", hint: "上传产品/商品图" },
         precisePerson: { label: "精准人物" },
         combination: { label: "组合替换", hint: "想一起换的都传上，至少一类" },
-        dance: { label: "跳舞复刻", hint: "上传跳舞角色的全身图", slot: "角色图" },
         voice: "参考音色",
     },
     notes: {
@@ -42,7 +41,6 @@ export const zhCN = {
     },
     features: {
         replace: { title: "模特 / 商品替换", description: "解析短视频链接并结合主体图生成同款。" },
-        dance: { description: "参考视频动作和音乐，生成主体角色跳舞视频。" },
     },
     sharePlatforms: "抖音 / 小红书 / 快手 / 视频号",
     studio: {
@@ -54,7 +52,7 @@ export const zhCN = {
     },
     results: {
         kind: {
-            hot: "爆款复刻",
+            hot: "视频复刻",
             model: "模特替换",
             clothing: "服饰替换",
             face: "人脸替换",

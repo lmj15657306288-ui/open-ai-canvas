@@ -11,7 +11,6 @@ export const jaJP: DeepStringRecord<typeof zhCN> = {
         preciseProduct: { label: "精密商品", hint: "商品画像をアップロード" },
         precisePerson: { label: "精密人物" },
         combination: { label: "組み合わせ", hint: "まとめて差し替えたい素材をすべてアップロード（1 種類以上）" },
-        dance: { label: "ダンス再現", hint: "踊るキャラクターの全身画像をアップロード", slot: "キャラクター画像" },
         voice: "参考音声",
     },
     notes: {
@@ -44,7 +43,6 @@ export const jaJP: DeepStringRecord<typeof zhCN> = {
     },
     features: {
         replace: { title: "モデル・商品の差し替え", description: "ショート動画のリンクを解析し、被写体画像で同じ動画を生成します。" },
-        dance: { description: "参考動画の動きと音楽で、キャラクターのダンス動画を生成します。" },
     },
     sharePlatforms: "抖音 / 小紅書 / 快手 / WeChat Channels",
     studio: {

@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterVideoReplicationRoutes 注册影棚视频「爆款复刻」接口；归属与功能开关都在 service 校验。
+// RegisterVideoReplicationRoutes 注册影棚视频「商品视频复刻」接口；归属与功能开关都在 service 校验。
 func RegisterVideoReplicationRoutes(r *gin.RouterGroup, svc *service.Service) {
 	group := r.Group("/video-replication/projects")
 	group.POST("/:id/outputs/:outputId/comparison-download", func(c *gin.Context) {
@@ -379,7 +379,7 @@ func RegisterVideoReplicationRoutes(r *gin.RouterGroup, svc *service.Service) {
 	})
 }
 
-// RegisterVideoReplicationAdminRoutes 爆款复刻后台：分析模型、开放的视频模型与参数、运行状态、项目监控。
+// RegisterVideoReplicationAdminRoutes 电商视频 Agent 后台：分析模型、开放的视频模型与参数、运行状态、项目监控。
 func RegisterVideoReplicationAdminRoutes(r *gin.RouterGroup, svc *service.Service) {
 	r.GET("/video-replication/config", func(c *gin.Context) {
 		if _, err := currentUser(c, svc); err != nil {

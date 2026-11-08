@@ -57,7 +57,7 @@ func TestVideoReplicationClipDigestAndRules(t *testing.T) {
 			t.Fatalf("shot prompt missing %q: %s", want, prompt)
 		}
 	}
-	if lip := videoReplicationWithLipSyncPrompt("画面", "大家好"); !strings.Contains(lip, "口型") || !strings.Contains(lip, "大家好") {
+	if lip := videoReplicationWithLipSyncPrompt("画面", "大家好", videoReplicationPromptBudgetFor(VideoReplicationParameters{})); !strings.Contains(lip, "口型") || !strings.Contains(lip, "大家好") {
 		t.Fatalf("lip sync prompt = %q", lip)
 	}
 	if !videoReplicationNeedsTranscript(VideoReplicationParameters{Auto: true, Talking: true}) {

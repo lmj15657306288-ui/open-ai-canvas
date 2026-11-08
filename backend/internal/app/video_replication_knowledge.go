@@ -184,9 +184,9 @@ func videoReplicationKnowledgeSystem(knowledge *videoReplicationActiveKnowledge)
 func videoReplicationKnowledgeNegative(id string) string {
 	switch id {
 	case VideoReplicationKnowledgeKling:
-		return "负向：主体漂移，产品变形，肢体畸形，多余手指，文字乱码，新增字幕，水印，口型与台词错位，不说话时嘴部乱动，声音与说话人不符。"
+		return "负向：主体漂移，产品变形，肢体畸形，多余手指，文字乱码，编造产品参数，新增字幕，水印，口型与台词错位，不说话时嘴部乱动，声音与说话人不符，表情僵硬，假笑，蜡像脸，磨皮塑料感，动作僵硬机械，动作卡顿，木偶感，播音腔，机器人念稿。"
 	case VideoReplicationKnowledgeSeedance:
-		return "反提示词：不要主体漂移，不要产品变形，不要肢体畸形，不要多余手指，不要文字乱码或新生成文字，不要水印，不要人物口型与台词错位，不要不说话时嘴部乱动。"
+		return "反提示词：不要主体漂移，不要产品变形，不要肢体畸形，不要多余手指，不要文字乱码、编造产品参数或新增字幕，不要水印，不要人物口型与台词错位，不要不说话时嘴部乱动，不要表情僵硬或假笑，不要蜡像脸和磨皮塑料感，不要动作僵硬机械、卡顿或像木偶，不要播音腔或机器人念稿。"
 	}
 	return ""
 }

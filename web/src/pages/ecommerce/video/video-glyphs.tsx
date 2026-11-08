@@ -3,42 +3,26 @@ import type { ReactNode } from "react";
 import type { EcommerceVideoFeature, ReplaceKind } from "./video-kinds";
 
 /*
- * 商品视频的功能 / 替换类型图标：24×24 双色线稿，主线条用 currentColor，强调面用 --glyph-accent，
- * 放在渐变底块里，明暗主题下都清楚。
+ * 商品视频的功能 / 替换类型标识：24×24 单色线稿，统一笔宽与光学留白，
+ * 线条和浅填充跟随前景色，暗色白线、亮色墨线。
  */
 
 function Glyph({ children }: { children: ReactNode }) {
     return (
-        <svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {children}
         </svg>
     );
 }
 
-const ACCENT = "var(--glyph-accent, currentColor)";
+const ACCENT = "currentColor";
 
-export function FeatureGlyph({ id }: { id: EcommerceVideoFeature }) {
-    if (id === "dance") {
-        return (
-            <Glyph>
-                <circle cx={9} cy={5} r={1.8} fill={ACCENT} stroke="none" />
-                <path d="M9 7.5 L8 12.5 L5 16" />
-                <path d="M8.2 11 L12 9.2 L13.6 6.4" />
-                <path d="M8 12.5 L11 15 L10.4 19.5" />
-                <path d="M16 4.5 v7.2" stroke={ACCENT} />
-                <path d="M16 4.5 l3.4 -1 v2.4 l-3.4 1" stroke={ACCENT} />
-                <ellipse cx={14.8} cy={12} rx={1.6} ry={1.2} fill={ACCENT} stroke="none" />
-            </Glyph>
-        );
-    }
+export function FeatureGlyph(_props: { id: EcommerceVideoFeature }) {
     return (
         <Glyph>
-            <rect x={3.5} y={4} width={9} height={12} rx={2} />
-            <rect x={11.5} y={8} width={9} height={12} rx={2} fill={ACCENT} fillOpacity={0.22} stroke={ACCENT} />
-            <path d="M6.5 19.5 Q6.5 21 8 21 H10" />
-            <path d="M9 19.6 L10.4 21 L9 22.4" />
-            <path d="M17.5 4.5 Q17.5 3 16 3 H14" />
-            <path d="M15 1.6 L13.6 3 L15 4.4" />
+            <rect x={3} y={3.5} width={9} height={12} rx={2.25} />
+            <rect x={12} y={8.5} width={9} height={12} rx={2.25} fill={ACCENT} fillOpacity={0.08} />
+            <path d="M3.5 18.5a2 2 0 0 0 2 2H9m-2-2 2 2-2 2M20.5 5.5a2 2 0 0 0-2-2H15m2-2-2 2 2 2" />
         </Glyph>
     );
 }

@@ -1,4 +1,4 @@
-/* 电商 Agent「商品视频」：左侧参数面板（复用 .ecs-composer 外壳）+ 右侧视频作品，与图片生成页同构。 */
+/* 电商 Agent「商品视频」：左侧参数面板（复用 .ecs-composer 外壳）+ 右侧视频作品。 */
 .ecs-shell {
     --ecv-good: #16a34a;
     --ecv-bad: var(--destructive, #dc2626);
@@ -18,7 +18,7 @@
     width: 100%;
     padding: var(--space-3);
     border: 1px solid var(--user-border);
-    border-radius: var(--r-xl, 14px);
+    border-radius: var(--r-lg);
     background: var(--user-surface-muted);
     color: var(--user-ink);
     text-align: left;
@@ -40,7 +40,7 @@
 }
 .ecv-feature-copy {
     display: grid;
-    gap: 2px;
+    gap: var(--space-1);
     min-width: 0;
 }
 .ecv-feature-copy small {
@@ -49,8 +49,8 @@
 }
 .ecv-feature-copy strong {
     font-size: var(--fs-heading, 16px);
-    font-weight: 650;
-    line-height: 1.25;
+    font-weight: 600;
+    line-height: var(--lh-heading);
 }
 .ecv-feature-copy span {
     overflow: hidden;
@@ -65,9 +65,8 @@
     gap: 2px;
     height: 24px;
     padding: 0 var(--space-2);
-    border-radius: 999px;
-    background: var(--control-selected-bg);
-    color: var(--control-selected-fg);
+    border-radius: var(--r-md);
+    color: var(--user-ink-muted);
     font-size: var(--fs-caption);
     font-weight: 600;
 }
@@ -79,17 +78,17 @@
 }
 .ecv-feature-menu {
     position: absolute;
-    z-index: 30;
+    z-index: var(--z-dropdown);
     top: calc(100% + 6px);
     left: 0;
     right: 0;
     display: grid;
-    gap: 4px;
+    gap: var(--space-1);
     padding: var(--space-2);
     border: 1px solid var(--user-border);
-    border-radius: var(--r-xl, 14px);
+    border-radius: var(--r-lg);
     background: var(--user-surface);
-    box-shadow: 0 16px 40px color-mix(in srgb, #000 18%, transparent);
+    box-shadow: var(--elevation-overlay);
 }
 .ecv-feature-menu > button {
     display: grid;
@@ -98,7 +97,7 @@
     gap: var(--space-3);
     padding: var(--space-2);
     border: 1px solid transparent;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-md);
     background: transparent;
     color: var(--user-ink);
     text-align: left;
@@ -145,7 +144,7 @@
 .ecv-block-head h3 {
     margin: 0;
     font-size: var(--fs-ui);
-    font-weight: 600;
+    font-weight: 650;
 }
 .ecv-block-head p {
     margin: 0;
@@ -165,8 +164,7 @@
 /* ---------- 替换类型 ---------- */
 .ecv-kinds {
     display: grid;
-    /* 面板加宽后按可用宽度自动增列，减少替换类型占用的行数。 */
-    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: var(--space-2);
 }
 .ecv-kinds button {
@@ -872,7 +870,7 @@
     background: var(--ecv-bad, #dc2626);
 }
 
-/* ---------- 右侧作品区 ---------- */
+/* ---------- 右侧视频作品 ---------- */
 .ecv-results {
     overflow: hidden;
     border-radius: var(--r-2xl);
@@ -883,14 +881,12 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    /* 与 .wb-gallery-head / .commerce-output-gallery-header 对齐。 */
-    min-height: 44px;
-    padding: var(--space-1) var(--space-1) var(--space-3);
+    padding: var(--space-3) var(--space-1);
 }
 .ecv-results-head h2 {
     margin: 0;
     font-size: var(--fs-heading, 16px);
-    font-weight: 600;
+    font-weight: 650;
 }
 .ecv-results-head small {
     margin-left: 6px;
@@ -981,8 +977,7 @@
     color: rgb(255 255 255 / 50%);
 }
 /* 瀑布流以竖屏为一格、宽屏为两格：大屏最多四张竖屏或两张横屏。 */
-/* 左面板加宽后结果区变窄，阈值同步下调，避免作品网格从两列掉回一列。 */
-@container (min-width: 560px) {
+@container (min-width: 600px) {
     .ecv-results-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1135,6 +1130,9 @@
 }
 
 @media (max-width: 520px) {
+    .ecv-kinds {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
     .ecv-video-box {
         grid-template-columns: minmax(0, 1fr);
         justify-items: start;

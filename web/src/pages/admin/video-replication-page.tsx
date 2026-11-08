@@ -1,5 +1,6 @@
-import { Alert, App, Button, Card, Drawer, Empty, Input, InputNumber, Segmented, Select, Space, Switch, Table, Tag, Typography } from "antd";
-import { ArrowUpRight, CheckCircle2, Plus, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-react";
+import { Alert, App, Button, Card, Drawer, Input, InputNumber, Segmented, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { EmptyState } from "@/components/ui/product/empty-state";
+import { ArrowUpRight, CheckCircle2, Plus, RefreshCw, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 
@@ -32,7 +33,7 @@ import type { FeatureAvailability } from "@/stores/use-user-store";
 import { AdminPageFrame } from "./components/admin-shell";
 import { AdminStatTile, AdminStatusBadge } from "./components/admin-ui";
 import "./video-replication-page.css";
-import { audioModelOptions, OPENAI_COMPATIBLE_VOICES, planningModelOptions, recommended, visionModelOptions, type ReplicationModelOption } from "./video-replication-models";
+import { audioModelOptions, OPENAI_COMPATIBLE_VOICES, planningModelOptions, recommended, visionModelOptions, type ReplicationModelOption, type ReplicationTextModelOption } from "./video-replication-models";
 
 /*
  * 电商视频 Agent 后台：所有页面读写的都是前台「电商 Agent → 商品视频」真正使用的配置与数据
@@ -45,7 +46,7 @@ const SECTIONS: Record<VideoAgentSection, { title: string; description: string; 
     overview: { title: "运行总览", description: "商品视频的真实运行数据：提交量、成片、失败原因与运行环境检查。", editable: false },
     features: { title: "功能开放", description: "控制前台「商品视频」开放哪些替换类型，以及参考视频时长上限。关闭后前台隐藏该类型，后端也拒绝提交。", editable: true },
     models: { title: "分析与声音模型", description: "视频理解、分镜策划、语音识别与配音模型。前台不展示这些模型。", editable: true },
-    "video-models": { title: "视频生成模型", description: "开放给用户选择的视频生成模型及其比例、清晰度与音频选项。未添加时开放全部系统视频模型。", editable: true },
+    "video-models": { title: "视频生成模型", description: "设置商品视频可选的模型、比例、清晰度和音频选项。", editable: true },
     knowledge: { title: "模型知识库", description: "按用户选择的视频模型调用对应的提示词知识库：Seedance 系列（2.0 mini、2.0 等）调用 Seedance 2.5 支持库，可灵系列调用可灵 4.0 支持库。关闭后 Agent 不调用该知识库，按通用写法规划。", editable: true },
     tasks: { title: "任务管理", description: "所有用户提交的商品视频任务，点击查看素材、子任务（逐段生成）与成片。", editable: false },
 };
@@ -59,7 +60,6 @@ export const VIDEO_KIND_SWITCHES: Array<{ id: string; label: string; description
     { id: "precise-product", label: "精准商品", description: "按多角度图严格还原商品细节" },
     { id: "precise-person", label: "精准人物", description: "按多角度照片严格还原人物" },
     { id: "combination", label: "组合替换", description: "商品、模特、背景同时替换" },
-    { id: "dance", label: "跳舞复刻", description: "视频功能切换里的「跳舞复刻」" },
 ];
 
 const MODE_LABEL: Record<string, string> = Object.fromEntries([...VIDEO_KIND_SWITCHES.map((item) => [item.id, item.label]), ["legacy", "旧版复刻"]]);
@@ -132,9 +132,9 @@ function useReplicationSetting(withCatalog: boolean) {
     const { message } = App.useApp();
     const [status, setStatus] = useState<VideoReplicationAdminStatus>();
     const [setting, setSetting] = useState<VideoReplicationSetting>({ videoModels: [] });
-    const [options, setOptions] = useState<{ vision: ReplicationModelOption[]; planning: ReplicationModelOption[]; tts: ReplicationModelOption[]; asr: ReplicationModelOption[] }>({ vision: [], planning: [], tts: [], asr: [] });
+    const [options, setOptions] = useState<{ vision: ReplicationTextModelOption[]; planning: ReplicationTextModelOption[]; tts: ReplicationModelOption[]; asr: ReplicationModelOption[] }>({ vision: [], planning: [], tts: [], asr: [] });
     const [videoModels, setVideoModels] = useState<VideoModelOption[]>([]);
-    // 视频生成模型下拉用的目录：与首页同一份转换（系统渠道 + 智能路由）。
+    // 首页同款模型选择器使用同一份目录转换（系统渠道 + 智能路由）。
     const [pickerConfig, setPickerConfig] = useState<AiConfig>(() => ({ ...defaultConfig, channels: [] }));
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -362,7 +362,7 @@ function OverviewSection() {
                                 ))}
                         </ul>
                     ) : (
-                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这段时间没有提交" />
+                        <EmptyState title="这段时间没有提交" />
                     )}
                 </Card>
                 <Card size="small" title="主要失败原因">
@@ -376,7 +376,7 @@ function OverviewSection() {
                             ))}
                         </ul>
                     ) : (
-                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这段时间没有失败任务" />
+                        <EmptyState title="这段时间没有失败任务" />
                     )}
                 </Card>
             </div>
@@ -420,9 +420,9 @@ function FeaturesSection({ state }: { state: SettingState }) {
                 <label className="vr-admin-field is-inline">
                     <span>
                         <strong>参考视频时长上限</strong>
-                        <small>用户上传或链接解析的参考视频最长秒数（4–120）。成片时长跟随参考视频。</small>
+                        <small>管理员自由设置参考视频上限，支持 4–600 秒。</small>
                     </span>
-                    <InputNumber min={4} max={120} value={state.setting.maxReferenceSeconds || 120} onChange={(value) => state.patch({ maxReferenceSeconds: Number(value) || 120 })} addonAfter="秒" />
+                    <InputNumber min={4} max={600} value={state.setting.maxReferenceSeconds || 120} onChange={(value) => state.patch({ maxReferenceSeconds: Number(value) || 120 })} addonAfter="秒" />
                 </label>
             </Card>
         </>
@@ -430,12 +430,63 @@ function FeaturesSection({ state }: { state: SettingState }) {
 }
 
 function ModelsSection({ state }: { state: SettingState }) {
-    const { setting, patch, options } = state;
+    const { setting, patch, options, pickerConfig } = state;
     const tts = setting.tts || { model: {}, voices: [] };
     const patchTTS = (next: Partial<NonNullable<VideoReplicationSetting["tts"]>>) => patch({ tts: { ...tts, ...next } });
     const patchVoice = (index: number, next: Partial<VideoReplicationVoiceOption>) => patchTTS({ voices: tts.voices.map((voice, voiceIndex) => (voiceIndex === index ? { ...voice, ...next } : voice)) });
-    const modelSelect = (label: string, value: VideoReplicationModelRef | undefined, onChange: (ref?: VideoReplicationModelRef) => void, hint: string, list: ReplicationModelOption[], placeholder: string) => {
+    const modelRecommendation = (list: ReplicationModelOption[], current: string, onChange: (ref?: VideoReplicationModelRef) => void) => {
         const best = recommended(list);
+        return best ? (
+            <small className="vr-admin-recommend">
+                <Sparkles size={12} />
+                推荐 {best.label.split(" · ").slice(0, 2).join(" · ")}（{best.reason}）
+                {best.value !== current ? (
+                    <Button size="small" type="link" onClick={() => onChange(refFromValue(best.value))}>
+                        使用推荐
+                    </Button>
+                ) : (
+                    <Tag color="green">当前即推荐</Tag>
+                )}
+            </small>
+        ) : (
+            <small className="vr-admin-recommend">网站目前没有符合条件的模型，请先在渠道管理里接入</small>
+        );
+    };
+    const analysisModelPicker = (label: string, value: VideoReplicationModelRef | undefined, onChange: (ref?: VideoReplicationModelRef) => void, hint: string, list: ReplicationTextModelOption[], placeholder: string) => {
+        const current = refValue(value);
+        const selected = list.find((item) => item.value === current);
+        const byPickerValue = new Map(list.map((item) => [item.pickerValue, item]));
+        return (
+            <div className="vr-admin-field">
+                <span>
+                    <strong>{label}</strong>
+                    <small>{hint}</small>
+                </span>
+                <div className="vr-admin-model-picker vr-admin-analysis-picker">
+                    <ModelPicker
+                        config={pickerConfig}
+                        capability="text"
+                        value={selected?.pickerValue}
+                        fullWidth
+                        className="creation-model-picker"
+                        popoverClassName="vr-admin-analysis-popover"
+                        showSelectedPrice={false}
+                        placeholder={label}
+                        triggerLabel={current ? (selected ? undefined : `${value?.modelKey || "已保存的模型"} · 当前不可选`) : placeholder}
+                        modelFilter={(model) => byPickerValue.has(model)}
+                        modelDisabledReason={(model) => (byPickerValue.get(model)?.disabled ? "需要支持图片输入" : "")}
+                        onChange={(model) => {
+                            const option = byPickerValue.get(model);
+                            if (option && !option.disabled) onChange(refFromValue(option.value));
+                        }}
+                    />
+                    {current ? <Button type="text" icon={<X size={14} />} aria-label={`清除${label}`} title="恢复默认模型" onClick={() => onChange(undefined)} /> : null}
+                </div>
+                {modelRecommendation(list, current, onChange)}
+            </div>
+        );
+    };
+    const modelSelect = (label: string, value: VideoReplicationModelRef | undefined, onChange: (ref?: VideoReplicationModelRef) => void, hint: string, list: ReplicationModelOption[], placeholder: string) => {
         const current = refValue(value);
         return (
             <label className="vr-admin-field">
@@ -453,30 +504,16 @@ function ModelsSection({ state }: { state: SettingState }) {
                     onChange={(next?: string) => onChange(refFromValue(next))}
                     style={{ width: "100%" }}
                 />
-                {best ? (
-                    <small className="vr-admin-recommend">
-                        <Sparkles size={12} />
-                        推荐 {best.label.split(" · ").slice(0, 2).join(" · ")}（{best.reason}）
-                        {best.value !== current ? (
-                            <Button size="small" type="link" onClick={() => onChange(refFromValue(best.value))}>
-                                使用推荐
-                            </Button>
-                        ) : (
-                            <Tag color="green">当前即推荐</Tag>
-                        )}
-                    </small>
-                ) : (
-                    <small className="vr-admin-recommend">网站目前没有符合条件的模型，请先在渠道管理里接入</small>
-                )}
+                {modelRecommendation(list, current, onChange)}
             </label>
         );
     };
     return (
         <div className="vr-admin-column">
             <Card size="small" title="分析模型" extra={<Typography.Text type="secondary">推荐按模型声明的能力与近 24 小时可用率计算</Typography.Text>}>
-                <div className="vr-admin-grid">
-                    {modelSelect("视频理解模型", setting.vision, (vision) => patch({ vision }), "读取关键帧与台词，拆解镜头、运镜、口播、说话人与商品/模特档案（需支持图片输入）", options.vision, "未指定：沿用电商 Agent 识图模型")}
-                    {modelSelect("分镜策划模型", setting.planning, (planning) => patch({ planning }), "重构原创分镜、改写口播台词、推荐说话人音色", options.planning, "未指定：沿用电商 Agent 策划模型")}
+                <div className="vr-admin-grid vr-admin-analysis-grid">
+                    {analysisModelPicker("视频理解模型", setting.vision, (vision) => patch({ vision }), "读取关键帧与台词，拆解镜头、运镜、口播、说话人与商品/模特档案（需支持图片输入）", options.vision, "未指定：沿用电商 Agent 识图模型")}
+                    {analysisModelPicker("分镜策划模型", setting.planning, (planning) => patch({ planning }), "重构原创分镜、改写口播台词、推荐说话人音色", options.planning, "未指定：沿用电商 Agent 策划模型")}
                 </div>
             </Card>
 
@@ -498,7 +535,14 @@ function ModelsSection({ state }: { state: SettingState }) {
                         />
                     </label>
                     {setting.asr?.mode === "model"
-                        ? modelSelect("语音识别模型", setting.asr.model, (model) => patch({ asr: { ...setting.asr!, model: model || {} } }), "例如 whisper-1、gpt-4o-transcribe 等转写模型", options.asr, "选择语音识别模型")
+                        ? modelSelect(
+                              "语音识别模型",
+                              setting.asr.model,
+                              (model) => patch({ asr: { mode: model ? "model" : "env", model: model || {}, language: setting.asr?.language } }),
+                              "例如 whisper-1、gpt-4o-transcribe 等转写模型",
+                              options.asr,
+                              "选择语音识别模型",
+                          )
                         : null}
                 </div>
                 <div className="vr-admin-grid">
@@ -561,18 +605,44 @@ function VideoModelsSection({ state }: { state: SettingState }) {
     const listedPickerValues = useMemo(() => new Set(videoModels.map((option) => option.pickerValue).filter(Boolean)), [videoModels]);
     const usedPickerValues = useMemo(() => new Set(videoModels.filter((option) => usedValues.has(option.value)).map((option) => option.pickerValue)), [usedValues, videoModels]);
     const listedModel = useCallback((model: string) => listedPickerValues.has(model), [listedPickerValues]);
+    const addModel = (value: string) => {
+        const option = videoModels.find((item) => item.value === value);
+        if (!option || usedValues.has(option.value)) return;
+        patch({
+            restrictVideoModels: true,
+            videoModels: [{ ...option.ref, label: option.label.slice(0, 60), enabled: true, generateAudio: false, allowAudioToggle: true }, ...setting.videoModels],
+        });
+    };
     return (
         <div className="vr-admin-column">
             <Card
                 size="small"
                 title="视频生成模型"
                 extra={
-                    <Button size="small" icon={<Plus size={14} />} onClick={() => patch({ videoModels: [...setting.videoModels, { enabled: true, generateAudio: false, allowAudioToggle: true }] })}>
-                        添加模型
-                    </Button>
+                    setting.videoModels.length >= 30 ? (
+                        <Typography.Text type="secondary">已添加 30 个模型</Typography.Text>
+                    ) : (
+                        <Select<string | null>
+                            size="small"
+                            className="min-w-32"
+                            classNames={{ placeholder: "vr-admin-add-model-label" }}
+                            aria-label="添加模型"
+                            placeholder="添加模型"
+                            prefix={<Plus size={14} />}
+                            value={null}
+                            showSearch={{ optionFilterProp: "label" }}
+                            placement="bottomRight"
+                            popupMatchSelectWidth={false}
+                            notFoundContent="没有可添加的视频模型"
+                            options={videoModels.filter((item) => item.pickerValue && !usedValues.has(item.value)).map((item) => ({ value: item.value, label: item.label }))}
+                            onChange={(value) => {
+                                if (value) addModel(value);
+                            }}
+                        />
+                    )
                 }
             >
-                <Typography.Paragraph type="secondary">不添加时，用户可选全部系统视频模型。添加后只开放启用的模型。时长不可配置：系统按参考视频时长与模型单次上限自动决定原生直出（1 个任务）或智能分段（多段 + 自动合成）。</Typography.Paragraph>
+                <Typography.Paragraph type="secondary">添加后，用户只能选择名单中已开放且渠道可用的模型。</Typography.Paragraph>
                 {setting.videoModels.length ? (
                     <div className="vr-admin-models">
                         {setting.videoModels.map((item, index) => {
@@ -580,7 +650,7 @@ function VideoModelsSection({ state }: { state: SettingState }) {
                             const ratios = option?.ratios || [];
                             const resolutions = option?.resolutions || [];
                             return (
-                                <div key={index} className="vr-admin-model">
+                                <div key={refValue(item)} className="vr-admin-model">
                                     <div className="vr-admin-model-head">
                                         <div className="vr-admin-model-picker">
                                             <ModelPicker
@@ -593,8 +663,7 @@ function VideoModelsSection({ state }: { state: SettingState }) {
                                                 showOptionPrices
                                                 placeholder="选择视频模型"
                                                 value={option?.pickerValue}
-                                                // 已保存但已停用 / 下架的模型：用保存时的名称显示，避免只看到占位文字。
-                                                triggerLabel={!option && refValue(item) ? `${item.label || refValue(item)} · 已停用或下架` : undefined}
+                                                triggerLabel={!option ? item.label || refValue(item) : undefined}
                                                 modelFilter={listedModel}
                                                 modelDisabledReason={(model) => (model !== option?.pickerValue && usedPickerValues.has(model) ? "已在其他行添加" : "")}
                                                 onChange={(model) => {
@@ -684,20 +753,20 @@ function VideoModelsSection({ state }: { state: SettingState }) {
                                                 </Space>
                                             </Space>
                                         </>
-                                    ) : refValue(item) ? (
-                                        <Alert
-                                            type="warning"
-                                            showIcon
-                                            message={`「${item.label || refValue(item)}」已在渠道里停用或被上游下架，前台用户看不到它，这一行不起作用。`}
-                                            description="点右侧删除图标移除这一行并保存，或在下拉里换成其他视频模型。"
-                                        />
                                     ) : null}
                                 </div>
                             );
                         })}
                     </div>
+                ) : setting.restrictVideoModels ? (
+                    <Space wrap>
+                        <Typography.Text type="secondary">当前没有开放的视频模型。</Typography.Text>
+                        <Button size="small" onClick={() => patch({ restrictVideoModels: false })}>
+                            开放全部系统视频模型
+                        </Button>
+                    </Space>
                 ) : (
-                    <Typography.Text type="secondary">尚未限定，前台显示全部系统视频模型。</Typography.Text>
+                    <Typography.Text type="secondary">当前开放全部可用的系统视频模型。</Typography.Text>
                 )}
             </Card>
         </div>

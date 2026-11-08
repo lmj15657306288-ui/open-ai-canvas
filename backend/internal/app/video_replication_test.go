@@ -416,15 +416,15 @@ func TestVideoReplicationAnalysisLeaseExpiry(t *testing.T) {
 	if err := svc.repo.CreateVideoReplicationProject(project); err != nil {
 		t.Fatal(err)
 	}
-	// 租约与仓储里的 now 比较口径必须同源：实现用本地时间的 time.Now() 做条件比较，
-	// 这里若转成 UTC，SQLite 会把两侧存成带时区偏移的字符串做字典序比较，
-	// 在非 UTC 时区（如 +08:00）下 "04:03+00:00" < "12:03+08:00" 会被误判为已过期。
-	lease := time.Now().Add(time.Minute).Truncate(time.Second)
-	if claimed, err := svc.repo.ClaimVideoReplicationAnalysis("user-1", project.ID, lease); err != nil || !claimed {
+	lease := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	if claimed, err := svc.repo.ClaimVideoReplicationAnalysis("user-1", project.ID, lease, map[string]any{"parameters_json": `{"maxVideoTasks":1}`}); err != nil || !claimed {
 		t.Fatalf("claim = %v %v", claimed, err)
 	}
-	if claimed, _ := svc.repo.ClaimVideoReplicationAnalysis("user-1", project.ID, lease.Add(time.Minute)); claimed {
+	if claimed, _ := svc.repo.ClaimVideoReplicationAnalysis("user-1", project.ID, lease.Add(time.Minute), map[string]any{"parameters_json": `{"maxVideoTasks":2}`}); claimed {
 		t.Fatal("second concurrent analysis must not claim")
+	}
+	if stored, err := svc.repo.VideoReplicationProject("user-1", project.ID); err != nil || videoReplicationParameters(stored).MaxVideoTasks != 1 {
+		t.Fatalf("first submission must keep its confirmed task cap: %v, %v", stored, err)
 	}
 	if ok, err := svc.repo.UpdateVideoReplicationAnalysis("user-1", project.ID, lease, map[string]any{"stage": "x"}); err != nil || !ok {
 		t.Fatalf("lease owner update = %v %v", ok, err)
@@ -432,7 +432,7 @@ func TestVideoReplicationAnalysisLeaseExpiry(t *testing.T) {
 	if ok, _ := svc.repo.UpdateVideoReplicationAnalysis("user-1", project.ID, lease.Add(time.Hour), map[string]any{"stage": "stale"}); ok {
 		t.Fatal("stale analysis must not write")
 	}
-	if claimed, _ := svc.repo.ClaimVideoReplicationAnalysis("user-2", project.ID, lease); claimed {
+	if claimed, _ := svc.repo.ClaimVideoReplicationAnalysis("user-2", project.ID, lease, nil); claimed {
 		t.Fatal("other user must not claim")
 	}
 }
@@ -684,9 +684,23 @@ func TestVideoReplicationKeyUsedMatchesPrefixOnly(t *testing.T) {
 }
 
 func TestVideoReplicationSettingRestrictsModelsAndParams(t *testing.T) {
-	svc, db := newVideoReplicationTestService(t)
-	if err := db.AutoMigrate(&model.SystemSetting{}); err != nil {
+	svc, db, channel, channelModel, profile := newVideoTokenQuoteFixture(t)
+	spec, err := CapabilitySpecFromModelCapabilityConfig(profile, "video")
+	if err != nil {
 		t.Fatal(err)
+	}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []any{
+		&model.LogicalModel{ID: "lm-15", Code: "video", Capability: "video", Enabled: true, ActiveRevisionID: "rev"},
+		&model.LogicalModelRevision{ID: "rev", LogicalModelID: "lm-15", Version: 1, CapabilitySpecJSON: string(specJSON), DefaultOptionsJSON: "{}"},
+		&model.LogicalModelRoute{ID: "route", LogicalModelRevisionID: "rev", ChannelModelID: channelModel.ID, Enabled: true, Weight: 1},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	// 未配置时不限定模型。
 	if err := svc.videoReplicationModelAllowed(VideoReplicationParameters{LogicalModelID: "any"}); err != nil {
@@ -694,7 +708,7 @@ func TestVideoReplicationSettingRestrictsModelsAndParams(t *testing.T) {
 	}
 	setting := VideoReplicationSetting{VideoModels: []VideoReplicationVideoModel{
 		{EcommerceAgentModelRef: EcommerceAgentModelRef{LogicalModelID: "lm-15"}, Enabled: true, Ratios: []string{"9:16", "16:9"}, Resolutions: []string{"720p"}, GenerateAudio: true},
-		{EcommerceAgentModelRef: EcommerceAgentModelRef{ChannelModelID: "cm", ChannelID: "ch", ModelKey: "seedance-30"}, Enabled: true, AllowAudioToggle: true},
+		{EcommerceAgentModelRef: EcommerceAgentModelRef{ChannelModelID: channelModel.ID}, Enabled: true, AllowAudioToggle: true},
 		{EcommerceAgentModelRef: EcommerceAgentModelRef{LogicalModelID: "lm-off"}, Enabled: false},
 	}}
 	raw, _ := json.Marshal(setting)
@@ -709,7 +723,7 @@ func TestVideoReplicationSettingRestrictsModelsAndParams(t *testing.T) {
 		{VideoReplicationParameters{LogicalModelID: "lm-15", Ratio: "1:1", Resolution: "720p", GenerateAudio: true}, false},
 		{VideoReplicationParameters{LogicalModelID: "lm-15", Ratio: "9:16", Resolution: "1080p", GenerateAudio: true}, false},
 		{VideoReplicationParameters{LogicalModelID: "lm-15", Ratio: "9:16", Resolution: "720p", GenerateAudio: false}, false},
-		{VideoReplicationParameters{ChannelID: "ch", Model: "seedance-30", Ratio: "1:1", GenerateAudio: false}, true},
+		{VideoReplicationParameters{ChannelID: channel.ID, Model: channelModel.ModelKey, Ratio: "1:1", GenerateAudio: false}, true},
 		{VideoReplicationParameters{LogicalModelID: "lm-off"}, false},
 		{VideoReplicationParameters{LogicalModelID: "other"}, false},
 	}
@@ -717,6 +731,13 @@ func TestVideoReplicationSettingRestrictsModelsAndParams(t *testing.T) {
 		if err := svc.videoReplicationModelAllowed(item.params); (err == nil) != item.ok {
 			t.Fatalf("case %d: err=%v want ok=%v", index, err, item.ok)
 		}
+	}
+	if err := svc.DeleteSystemChannel(&model.User{ID: "admin", Role: model.UserRoleAdmin}, channel.ID); err != nil {
+		t.Fatal(err)
+	}
+	effective, err := svc.videoReplicationSetting()
+	if err != nil || !effective.RestrictVideoModels || len(effective.VideoModels) != 0 {
+		t.Fatalf("deleting the last supplier must remove direct and logical entries: %+v, %v", effective, err)
 	}
 }
 
@@ -764,15 +785,25 @@ func TestVideoReplicationAutoSegmentsFollowReferenceCuts(t *testing.T) {
 	if total != 60000 {
 		t.Fatalf("segments cover %dms, want 60000", total)
 	}
-	// 每段都在参考视频的切点处结束（最后一段在片尾）。
-	cuts := map[int64]bool{60000: true}
-	for _, shot := range video.Shots {
-		cuts[shot.EndMs] = true
+	if len(segments) != 4 {
+		t.Fatalf("reference cuts must not increase the four quoted tasks: %+v", segments)
 	}
-	for _, segment := range segments {
-		if !cuts[segment.EndMs] {
-			t.Fatalf("segment ends off a reference cut: %+v", segment)
-		}
+	video.DurationMs = 27000
+	segments = videoReplicationAutoSegments(video, 15, nil)
+	if len(segments) != 2 || segments[0].EndMs != 13000 {
+		t.Fatalf("prefer a reference cut when it fits the quoted task count: %+v", segments)
+	}
+}
+
+func TestVideoReplicationAutoSegmentsTrimShortOverflow(t *testing.T) {
+	shots := []VideoReplicationSourceShot{{StartMs: 0, EndMs: 6000}, {StartMs: 6000, EndMs: 12000}, {StartMs: 12000, EndMs: 15600}}
+	segments := videoReplicationAutoSegments(VideoReplicationVideoAnalysis{DurationMs: 15600, Shots: shots}, 15, []int{4, 5, 6, 8, 10, 12, 15})
+	if len(segments) != 1 || segments[0].StartMs != 0 || segments[0].EndMs != 15000 || segments[0].Seconds != 15 || len(segments[0].Refs) != 3 {
+		t.Fatalf("15.6s video with 15s limit should trim to one 15s segment: %+v", segments)
+	}
+	segments = videoReplicationAutoSegments(VideoReplicationVideoAnalysis{DurationMs: 16200, Shots: shots}, 15, nil)
+	if len(segments) != 2 {
+		t.Fatalf("16.2s video exceeds the 1s trim allowance and should split: %+v", segments)
 	}
 }
 

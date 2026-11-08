@@ -11,7 +11,6 @@ export const koKR: DeepStringRecord<typeof zhCN> = {
         preciseProduct: { label: "정밀 상품", hint: "상품 이미지 업로드" },
         precisePerson: { label: "정밀 인물" },
         combination: { label: "조합", hint: "함께 바꿀 소재를 모두 업로드(최소 1종)" },
-        dance: { label: "댄스 따라하기", hint: "춤출 캐릭터의 전신 이미지 업로드", slot: "캐릭터 이미지" },
         voice: "참고 음색",
     },
     notes: {
@@ -44,7 +43,6 @@ export const koKR: DeepStringRecord<typeof zhCN> = {
     },
     features: {
         replace: { title: "모델 / 상품 교체", description: "숏폼 영상 링크를 분석하고 피사체 이미지로 같은 스타일의 영상을 만듭니다." },
-        dance: { description: "참고 영상의 동작과 음악으로 캐릭터 댄스 영상을 만듭니다." },
     },
     sharePlatforms: "더우인 / 샤오훙수 / 콰이쇼우 / 위챗 채널스",
     studio: {

@@ -16,8 +16,8 @@ import (
 const videoReplicationVisionTotalBytes int64 = 12 << 20
 
 func validateVideoReplicationVisionProtocol(cfg ecommerceProviderConfig) error {
-	if cfg.TextProvider == nil || (cfg.TextProvider.InterfaceType != "gemini-multimodal-text" && cfg.TextProvider.InterfaceType != "apimart-gemini-video-text") {
-		return fmt.Errorf("完整视频理解需要选择 Gemini 多模态文本识别或 APIMart Gemini 视频理解协议，并确认上游支持视频输入；当前配置仅可用于图文问答")
+	if cfg.TextProvider == nil || (cfg.TextProvider.InterfaceType != "gemini-multimodal-text" && !videoReplicationUsesInlineMedia(cfg)) {
+		return fmt.Errorf("完整视频理解需要选择 Gemini 多模态文本识别、OpenAI 兼容 Gemini 多模态视频理解协议，并确认上游支持视频输入；当前配置仅可用于图文问答")
 	}
 	return nil
 }

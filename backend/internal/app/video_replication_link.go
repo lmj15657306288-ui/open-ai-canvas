@@ -59,9 +59,6 @@ func (s *Service) videoReplicationKindDisabled(params VideoReplicationParameters
 		return err
 	}
 	kind := params.ReplaceMode
-	if params.Dance {
-		kind = "dance"
-	}
 	if kind != "" && containsString(setting.DisabledKinds, kind) {
 		return BadAuthRequest("该视频功能暂未开放")
 	}

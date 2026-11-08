@@ -10,23 +10,24 @@ import (
 	"yingce/backend/internal/model"
 )
 
-// 爆款复刻的声音：Agent 从参考视频识别说话人，按后台登记的音色库为每个说话人推荐音色，
+// 商品视频复刻的声音：Agent 从参考视频识别说话人，按后台登记的音色库为每个说话人推荐音色，
 // 用户可改音色、把说话人绑定到某张模特图并试听。生成时每个有口播的镜头提交一个 TTS 任务，
 // 合成时按镜头起点把配音铺在整条时间线上，片段之间的声音是连续的一条轨。
 // TTS 使用后台指定的语音合成模型，走普通 canvas_audio 任务（按模型计费、失败退款）。
 
 type VideoReplicationVoiceRole struct {
-	SpeakerID    string `json:"speakerId"`
-	Label        string `json:"label"`
-	Gender       string `json:"gender,omitempty"`
-	Age          string `json:"age,omitempty"`
-	Tone         string `json:"tone,omitempty"`
-	OnCamera     bool   `json:"onCamera"`
-	VoiceKey     string `json:"voiceKey,omitempty"`
-	VoiceName    string `json:"voiceName,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	ModelAssetID string `json:"modelAssetId,omitempty"`
-	Instructions string `json:"instructions,omitempty"`
+	SpeakerID          string `json:"speakerId"`
+	Label              string `json:"label"`
+	Gender             string `json:"gender,omitempty"`
+	Age                string `json:"age,omitempty"`
+	Tone               string `json:"tone,omitempty"`
+	OnCamera           bool   `json:"onCamera"`
+	VoiceKey           string `json:"voiceKey,omitempty"`
+	VoiceName          string `json:"voiceName,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+	ModelAssetID       string `json:"modelAssetId,omitempty"`
+	Instructions       string `json:"instructions,omitempty"`
+	InstructionsSource string `json:"instructionsSource,omitempty"`
 }
 
 type VideoReplicationVoiceCast struct {
@@ -140,6 +141,7 @@ func (s *Service) recommendVideoReplicationVoices(ctx context.Context, cfg ecomm
 				role.ModelAssetID = picked.ModelAssetID
 			}
 			role.Reason, role.Instructions = clipText(picked.Reason, 60), clipText(picked.Instructions, 120)
+			role.InstructionsSource = "agent"
 		}
 		if role.VoiceKey == "" {
 			role.VoiceKey, role.VoiceName = setting.TTS.Voices[0].Key, setting.TTS.Voices[0].Name
@@ -199,6 +201,10 @@ func (s *Service) UpdateVideoReplicationVoiceCast(userID, projectID string, inpu
 			} else {
 				role.Reason = previous.Reason
 			}
+		}
+		role.InstructionsSource = "user"
+		if previous, ok := current.role(role.SpeakerID); ok && previous.InstructionsSource == "agent" && strings.TrimSpace(previous.Instructions) == strings.TrimSpace(role.Instructions) {
+			role.InstructionsSource = "agent"
 		}
 		role.Label = clipText(firstNonEmpty(strings.TrimSpace(role.Label), role.SpeakerID), 30)
 		role.Instructions = clipText(strings.TrimSpace(role.Instructions), 120)

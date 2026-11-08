@@ -2,54 +2,104 @@ package app
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"yingce/backend/internal/model"
 )
 
-// 一条已关闭的视频模型指向的渠道模型被停用后，保存设置会移除这一行，不再挡住其他设置；开放中的失效模型报错并点名。
-func TestUpdateVideoReplicationSettingDropsStaleDisabledVideoModel(t *testing.T) {
-	svc, db := newVideoReplicationTestService(t)
-	if err := db.AutoMigrate(&model.ChannelModel{}, &model.SystemSetting{}); err != nil {
-		t.Fatal(err)
+func TestVideoReplicationSettingDropsUnavailableModels(t *testing.T) {
+	svc, db := newChannelModelTestService(t)
+	admin := &model.User{ID: "admin", Role: model.UserRoleAdmin}
+	channels := []model.ModelChannel{
+		{ID: "on", Scope: model.ChannelScopeSystem, Enabled: true},
+		{ID: "off", Scope: model.ChannelScopeSystem, Enabled: false},
 	}
-	for _, item := range []model.ChannelModel{
-		{ID: "cm-live", ChannelID: "ch-1", ModelKey: "minimax-live", Capability: "video", Enabled: true},
-		{ID: "cm-gone", ChannelID: "ch-2", ModelKey: "wan-gone", Capability: "video", Enabled: true},
-	} {
-		if err := db.Create(&item).Error; err != nil {
+	models := []model.ChannelModel{
+		{ID: "vision", ChannelID: "on", ModelKey: "gemini", Capability: "text", Enabled: true},
+		{ID: "planning", ChannelID: "on", ModelKey: "planning", Capability: "text", Enabled: true},
+		{ID: "asr", ChannelID: "on", ModelKey: "transcribe", Capability: "audio", Enabled: false},
+		{ID: "tts", ChannelID: "off", ModelKey: "voice", Capability: "audio", Enabled: true},
+		{ID: "video-deleted", ChannelID: "on", ModelKey: "seedance", Capability: "video", Enabled: true},
+		{ID: "video-live", ChannelID: "on", ModelKey: "seedance-live", Capability: "video", Enabled: true},
+	}
+	for _, rows := range []any{&channels, &models} {
+		if err := db.Create(rows).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := db.Model(&model.ChannelModel{}).Where("id = ?", "cm-gone").Update("enabled", false).Error; err != nil {
-		t.Fatal(err)
-	}
-	admin := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
+	// 模拟旧版本留下的设置和管理员删除模型前打开的页面。
 	input := VideoReplicationSetting{
-		ASR: &VideoReplicationASRSetting{Mode: videoReplicationASRModeVision},
+		Vision:   &EcommerceAgentModelRef{ChannelModelID: "vision"},
+		Planning: &EcommerceAgentModelRef{ChannelModelID: "planning"},
+		ASR:      &VideoReplicationASRSetting{Mode: "model", Model: EcommerceAgentModelRef{ChannelModelID: "asr"}, Language: "zh"},
+		TTS:      &VideoReplicationTTSSetting{Model: EcommerceAgentModelRef{ChannelModelID: "tts"}},
 		VideoModels: []VideoReplicationVideoModel{
-			{EcommerceAgentModelRef: EcommerceAgentModelRef{ChannelModelID: "cm-gone", ChannelID: "ch-2", ModelKey: "wan-gone"}, Enabled: false},
-			{EcommerceAgentModelRef: EcommerceAgentModelRef{ChannelModelID: "cm-live"}, Enabled: true},
+			{EcommerceAgentModelRef: EcommerceAgentModelRef{ChannelModelID: "video-deleted"}, Enabled: true},
+			{EcommerceAgentModelRef: EcommerceAgentModelRef{ChannelModelID: "video-live"}, Enabled: false},
 		},
 	}
-	// 保存后的状态检查依赖更多运行环境，这里只关心写入的设置。
-	_, _ = svc.UpdateVideoReplicationSetting(admin, input)
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: videoReplicationSettingKey, ValueJSON: string(raw)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.DeleteAdminChannelModels(admin, "on", []string{"vision", "video-deleted"}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPruned := func(setting VideoReplicationSetting) {
+		t.Helper()
+		if setting.Vision != nil || setting.TTS != nil || setting.ASR == nil || setting.ASR.Mode != "env" || setting.ASR.Language != "zh" {
+			t.Fatalf("stale analysis or audio references: %+v", setting)
+		}
+		if setting.Planning == nil || setting.Planning.ModelKey != "planning" {
+			t.Fatalf("valid planning model not preserved: %+v", setting.Planning)
+		}
+		if !setting.RestrictVideoModels || len(setting.VideoModels) != 1 || setting.VideoModels[0].ChannelModelID != "video-live" || setting.VideoModels[0].Enabled {
+			t.Fatalf("video list or its restriction changed: %+v", setting)
+		}
+	}
+	status, err := svc.AdminVideoReplicationStatus(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPruned(status.Setting)
+	if err := svc.videoReplicationModelAllowed(VideoReplicationParameters{ChannelID: "on", Model: "seedance-live"}); err == nil {
+		t.Fatal("a closed video model must not be allowed when all models in the list are closed")
+	}
+
+	input.MaxReferenceSeconds = 90
+	status, err = svc.UpdateVideoReplicationSetting(admin, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPruned(status.Setting)
 	row, err := svc.repo.SystemSetting(videoReplicationSettingKey)
 	if err != nil {
-		t.Fatalf("setting not saved: %v", err)
+		t.Fatal(err)
 	}
 	var saved VideoReplicationSetting
 	if err := json.Unmarshal([]byte(row.ValueJSON), &saved); err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.VideoModels) != 1 || saved.VideoModels[0].ChannelModelID != "cm-live" || !saved.VideoModels[0].Enabled || saved.ASR == nil || saved.ASR.Mode != videoReplicationASRModeVision {
-		t.Fatalf("saved = %+v asr=%+v", saved.VideoModels, saved.ASR)
+	assertPruned(saved)
+	if saved.MaxReferenceSeconds != 90 {
+		t.Fatalf("unrelated change was not saved: %+v", saved)
 	}
 
-	input.VideoModels[0].Enabled = true
-	_, err = svc.UpdateVideoReplicationSetting(admin, input)
-	if err == nil || !strings.Contains(err.Error(), "视频生成模型「wan-gone」") {
-		t.Fatalf("enabled stale model must be rejected by name, got %v", err)
+	if err := svc.DeleteAdminChannelModel(admin, "on", "video-live"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: featureAvailabilitySettingKey, ValueJSON: `{"videoWorkbenchEnabled":true}`}); err != nil {
+		t.Fatal(err)
+	}
+	config, err := svc.VideoReplicationConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.RestrictVideoModels || len(config.VideoModels) != 0 || config.TTSConfigured {
+		t.Fatalf("empty restricted public list must stay closed: %+v", config)
 	}
 }

@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 
 	"gorm.io/gorm"
@@ -25,8 +26,17 @@ func (r *Repository) VideoReplicationProject(userID, id string) (*model.VideoRep
 
 func (r *Repository) VideoReplicationProjects(userID string, limit int) ([]model.VideoReplicationProject, error) {
 	var projects []model.VideoReplicationProject
-	err := r.db.Select("id", "user_id", "title", "video_type", "status", "stage", "progress", "error", "created_at", "updated_at").
-		Where("user_id = ?", userID).Order("updated_at DESC").Limit(limit).Find(&projects).Error
+	query := r.db.Select("id", "user_id", "title", "video_type", "status", "stage", "progress", "error", "created_at", "updated_at").
+		Where("user_id = ?", userID)
+	err := query.Order("updated_at DESC").Limit(limit).Find(&projects).Error
+	return projects, err
+}
+
+// ActiveVideoReplicationProjects 返回 since 之后创建、仍在生成或合成中的项目（跨用户，供后台推进）。
+func (r *Repository) ActiveVideoReplicationProjects(since time.Time, limit int) ([]model.VideoReplicationProject, error) {
+	var projects []model.VideoReplicationProject
+	err := r.db.Where("status IN ? AND created_at >= ?", []string{model.VideoReplicationStatusGenerating, model.VideoReplicationStatusComposing}, since).
+		Order("updated_at ASC").Limit(limit).Find(&projects).Error
 	return projects, err
 }
 
@@ -44,11 +54,17 @@ func (r *Repository) UpdateVideoReplicationProject(userID, id string, values map
 
 // ClaimVideoReplicationAnalysis 只在项目不处于分析中（或租约已过期）时把它切到 analyzing，
 // 防止双击或多个后端进程重复分析同一项目。
-func (r *Repository) ClaimVideoReplicationAnalysis(userID, id string, lease time.Time) (bool, error) {
-	now := time.Now()
-	res := r.db.Model(&model.VideoReplicationProject{}).
-		Where("id = ? AND user_id = ? AND (status <> ? OR analysis_lease_until IS NULL OR analysis_lease_until < ?)", id, userID, model.VideoReplicationStatusAnalyzing, now).
-		Updates(map[string]any{"status": model.VideoReplicationStatusAnalyzing, "stage": "素材检查", "progress": 2, "error": "", "analysis_lease_until": lease, "updated_at": now})
+func (r *Repository) ClaimVideoReplicationAnalysis(userID, id string, lease time.Time, startValues map[string]any) (bool, error) {
+	// 租约由调用方以 UTC 保存；SQLite 按时间文本比较，比较值必须使用相同时区。
+	now := time.Now().UTC()
+	query := r.db.Model(&model.VideoReplicationProject{}).
+		Where("id = ? AND user_id = ? AND (status <> ? OR analysis_lease_until IS NULL OR analysis_lease_until < ?)", id, userID, model.VideoReplicationStatusAnalyzing, now)
+	values := map[string]any{"status": model.VideoReplicationStatusAnalyzing, "stage": "素材检查", "progress": 2, "error": "", "analysis_lease_until": lease, "updated_at": now}
+	if startValues != nil {
+		query = query.Where("status NOT IN ?", []string{model.VideoReplicationStatusGenerating, model.VideoReplicationStatusComposing})
+		maps.Copy(values, startValues)
+	}
+	res := query.Updates(values)
 	return res.RowsAffected == 1, res.Error
 }
 
@@ -60,7 +76,7 @@ func (r *Repository) UpdateVideoReplicationAnalysis(userID, id string, lease tim
 }
 
 func (r *Repository) ExpireVideoReplicationAnalysis(userID, id string) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	return r.db.Model(&model.VideoReplicationProject{}).
 		Where("id = ? AND user_id = ? AND status = ? AND (analysis_lease_until IS NULL OR analysis_lease_until < ?)", id, userID, model.VideoReplicationStatusAnalyzing, now).
 		Updates(map[string]any{"status": model.VideoReplicationStatusFailed, "stage": "分析中断", "error": "分析过程被中断（服务重启或超时），请重新分析", "analysis_lease_until": nil, "updated_at": now}).Error
@@ -153,6 +169,15 @@ func (r *Repository) VideoReplicationRuns(userID, projectID string) ([]model.Vid
 	return runs, err
 }
 
+// VideoReplicationRunByTaskID 按生成任务 ID 找复刻镜头版本（后台请求明细标注参考素材用途）。
+func (r *Repository) VideoReplicationRunByTaskID(taskID string) (*model.VideoReplicationShotRun, error) {
+	var run model.VideoReplicationShotRun
+	if err := r.db.Where("task_id = ?", taskID).Order("created_at DESC").First(&run).Error; err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
 func (r *Repository) VideoReplicationRunByKey(projectID, key string) (*model.VideoReplicationShotRun, error) {
 	var run model.VideoReplicationShotRun
 	if err := r.db.First(&run, "project_id = ? AND idempotency_key = ?", projectID, key).Error; err != nil {
@@ -196,6 +221,11 @@ func (r *Repository) UpdateVideoReplicationRun(id string, values map[string]any)
 }
 
 // SelectVideoReplicationRun 把指定版本设为该分镜的采用版本（每个分镜只有一个）。
+// ClearVideoReplicationRunSelection 取消项目所有镜头版本的「采用」，之后按最新成功版本采用（整体重新生成时用）。
+func (r *Repository) ClearVideoReplicationRunSelection(userID, projectID string) error {
+	return r.db.Model(&model.VideoReplicationShotRun{}).Where("project_id = ? AND user_id = ?", projectID, userID).Update("selected", false).Error
+}
+
 func (r *Repository) SelectVideoReplicationRun(userID, projectID, runID string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var run model.VideoReplicationShotRun
@@ -347,7 +377,11 @@ func (r *Repository) StaleVideoReplicationCostOrders(scene string, before time.T
 // DeleteVideoReplicationProject 删除项目及其素材登记、镜头版本与成片版本；资源本身留在素材库，已提交的任务记录不受影响。
 func (r *Repository) DeleteVideoReplicationProject(userID, id string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&model.VideoReplicationProject{})
+		result := tx.Where("id = ? AND user_id = ? AND status NOT IN ?", id, userID, []string{
+			model.VideoReplicationStatusAnalyzing,
+			model.VideoReplicationStatusGenerating,
+			model.VideoReplicationStatusComposing,
+		}).Delete(&model.VideoReplicationProject{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -437,4 +471,18 @@ func (r *Repository) VideoReplicationProjectOwner(id string) (string, error) {
 		return "", err
 	}
 	return project.UserID, nil
+}
+
+// EnabledSystemChannelModelsByIDs 读取仍然启用的系统渠道模型（渠道与模型都启用、未删除），供商品视频后台校验所选模型。
+func (r *Repository) EnabledSystemChannelModelsByIDs(ids []string) ([]model.ChannelModel, error) {
+	var items []model.ChannelModel
+	if len(ids) == 0 {
+		return items, nil
+	}
+	err := r.db.Model(&model.ChannelModel{}).
+		Select("channel_models.id, channel_models.channel_id, channel_models.model_key, channel_models.capability").
+		Joins("JOIN model_channels ON model_channels.id = channel_models.channel_id").
+		Where("channel_models.id IN ? AND channel_models.enabled = ? AND model_channels.enabled = ? AND model_channels.scope = ? AND model_channels.deleted_at IS NULL", uniqueStrings(ids), true, true, model.ChannelScopeSystem).
+		Find(&items).Error
+	return items, err
 }

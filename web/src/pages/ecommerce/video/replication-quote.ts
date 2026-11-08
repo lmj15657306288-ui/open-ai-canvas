@@ -17,6 +17,8 @@ export async function quoteReplicationTasks({
     seconds,
     referenceCount,
     referenceMode,
+    referenceVideo = false,
+    audioCount = 0,
     signal,
 }: {
     config: ReturnType<typeof useEffectiveConfig>;
@@ -26,6 +28,8 @@ export async function quoteReplicationTasks({
     seconds: number[];
     referenceCount: number;
     referenceMode: "reference" | "first_frame" | "none";
+    referenceVideo?: boolean;
+    audioCount?: number;
     signal?: AbortSignal;
 }): Promise<ReplicationQuote> {
     if (!seconds.length) return { credits: null, estimated: true, usage: false };
@@ -35,7 +39,15 @@ export async function quoteReplicationTasks({
             const videoConfig = creationVideoConfig(config, model, { ratio: ratio || "", seconds: String(value), videoQuality: (resolution || "").replace(/p$/i, "") });
             const request = modelQuoteRequest(videoConfig, model, "video", {
                 capability: "video",
-                input: { textCount: 1, imageCount: referenceCount, referenceImageCount: referenceMode === "reference" ? referenceCount : 0, videoCount: 0, audioCount: 0, characterCount: 0 },
+                input: {
+                    textCount: 1,
+                    imageCount: referenceCount,
+                    referenceImageCount: referenceMode === "reference" ? referenceCount : 0,
+                    videoCount: referenceVideo ? 1 : 0,
+                    videoDurationsMs: referenceVideo ? [value * 1000] : undefined,
+                    audioCount,
+                    characterCount: 0,
+                },
                 videoSeconds: String(value),
                 options: { size: ratio, videoSeconds: value, vquality: (resolution || "").replace(/p$/i, "") },
             });

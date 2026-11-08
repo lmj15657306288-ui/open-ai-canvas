@@ -52,6 +52,13 @@ func TestVideoReplicationFullVideoProtocolRequests(t *testing.T) {
 	}
 }
 
+func TestVideoReplicationOpenAIGeminiMultimodalUsesInlineMedia(t *testing.T) {
+	cfg := ecommerceProviderConfig{TextProvider: &providerConfig{InterfaceType: "openai-gemini-multimodal"}}
+	if err := validateVideoReplicationVisionProtocol(cfg); err != nil || !videoReplicationUsesInlineMedia(cfg) {
+		t.Fatalf("validate=%v inline=%v", err, videoReplicationUsesInlineMedia(cfg))
+	}
+}
+
 func TestVideoReplicationRejectsImageOnlyProtocol(t *testing.T) {
 	for _, wire := range []string{"chat-completion", "apimart-gemini-vision", "claude-api"} {
 		if validateVideoReplicationVisionProtocol(ecommerceProviderConfig{TextProvider: &providerConfig{InterfaceType: wire}}) == nil {

@@ -17,6 +17,7 @@ export type VideoDraft = {
     linkText: string;
     notes: string;
     subjectHint: string;
+    productName?: string;
     audio: AudioChoice;
     keepMusic: boolean;
     talking: boolean;

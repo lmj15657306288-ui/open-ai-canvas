@@ -216,6 +216,7 @@ func (s *Service) StartWorker() {
 	s.startPaymentWorker(ctx)
 	s.startBillingAutoRefundWorker()
 	s.startVideoReplicationCostRecovery(ctx)
+	s.startVideoReplicationSyncWorker()
 	s.startArkPortraitWorker()
 	s.startDramaScheduler()
 	s.startInspirationFeedWorker()

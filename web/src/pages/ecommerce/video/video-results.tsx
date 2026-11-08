@@ -54,8 +54,7 @@ function filterOf(project: VideoReplicationProject): Exclude<Filter, "all"> {
 function kindLabel(project: VideoReplicationProject) {
     const mode = project.parameters.replaceMode;
     if (!mode) return translate("ecommerceVideo.results.kind.hot");
-    // 跳舞项目的标题由后端按中文生成，这里按原标题识别。
-    return mode === "model" && project.title.startsWith("跳舞") ? translate("ecommerceVideo.kinds.dance.label") : translate(`ecommerceVideo.results.kind.${KIND_LABEL_KEYS[mode] || "product"}`);
+    return translate(`ecommerceVideo.results.kind.${KIND_LABEL_KEYS[mode] || "product"}`);
 }
 
 function timeLabel(value: string) {

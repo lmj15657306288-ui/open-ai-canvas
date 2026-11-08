@@ -13,10 +13,10 @@ import (
 	"strings"
 )
 
-// 视频理解的「内嵌画面 + 音轨」输入：只接受公网视频链接的渠道（APIMart OpenAI 兼容接口）由境外服务器回国内存储下载视频，
-// 经常超时（2026-11-04 线上实测：签名链接 66 秒抓取失败，内嵌视频 data URL 被拒绝）。
+// 视频理解的「内嵌画面 + 音轨」输入：只接受公网视频链接的渠道（部分 OpenAI 兼容接口）由模型服务回源下载视频，
+// 跨境时经常超时（签名链接抓取失败、内嵌视频 data URL 被拒绝）。
 // 改为在服务端按时间均匀抽帧（与 Gemini 理解视频时约 1 帧/秒的采样一致），连同完整音轨一起内嵌在请求里发送，
-// 不再需要模型服务回源下载。APIMart 单条消息最多 16 张图片，所以画面按时间分到多条消息里。
+// 不再需要模型服务回源下载。部分接口单条消息最多 16 张图片，所以画面按时间分到多条消息里。
 
 const (
 	videoReplicationInlineImagesPerMessage = 16
@@ -35,6 +35,7 @@ type videoReplicationInlineMedia struct {
 	DurationMs int64
 	Frames     []videoReplicationInlineFrame
 	Audio      string
+	AudioLabel string
 }
 
 // prepareVideoReplicationInlineMedia 从参考视频抽取最多 maxFrames 帧（不超过 1 帧/秒）与 16 kHz 单声道音轨。
@@ -103,7 +104,8 @@ func videoReplicationInlineMessages(system, prompt string, media []videoReplicat
 			last = append(last, map[string]any{"type": "text", "text": fmt.Sprintf("参考视频 V%d 没有音轨。", videoIndex+1)})
 			continue
 		}
-		last = append(last, map[string]any{"type": "text", "text": fmt.Sprintf("参考视频 V%d 的完整音轨：", videoIndex+1)}, map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": item.Audio, "format": "mp3"}})
+		label := firstNonEmpty(item.AudioLabel, fmt.Sprintf("参考视频 V%d 的完整音轨：", videoIndex+1))
+		last = append(last, map[string]any{"type": "text", "text": label}, map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": item.Audio, "format": "mp3"}})
 	}
 	last = append(last, map[string]any{"type": "text", "text": prompt})
 	return append(messages, map[string]any{"role": "user", "content": last})
@@ -130,9 +132,16 @@ func (s *Service) videoReplicationInlineChatJSON(ctx context.Context, cfg ecomme
 	return ecommerceParseJSON(result.Text, out)
 }
 
+// videoReplicationInlineMediaProtocols 是走 OpenAI 兼容 /chat/completions、不能回源下载也不收 data URL 视频的视频理解协议：
+// apimart-gemini-video-text 协议，以及通用的 OpenAI 兼容 Gemini 多模态协议（sub2api、new-api 等不开放 /v1beta 的中转站）。
+var videoReplicationInlineMediaProtocols = map[string]bool{
+	"apimart-gemini-video-text": true,
+	"openai-gemini-multimodal":  true,
+}
+
 // videoReplicationUsesInlineMedia 判断视频理解渠道是否只能接收公网视频链接，需要改用内嵌画面与音轨。
 func videoReplicationUsesInlineMedia(cfg ecommerceProviderConfig) bool {
-	return cfg.TextProvider != nil && cfg.TextProvider.InterfaceType == "apimart-gemini-video-text"
+	return cfg.TextProvider != nil && videoReplicationInlineMediaProtocols[cfg.TextProvider.InterfaceType]
 }
 
 // videoReplicationRetryable 判断是否是值得自动重试一次的偶发上游错误（抓取超时、繁忙、网关超时）。

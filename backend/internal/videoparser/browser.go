@@ -78,7 +78,7 @@ func (c *chromiumCapturer) Capture(ctx context.Context, pageURL string, match fu
 	if err != nil {
 		return newError(ErrUnavailable, "解析出口未就绪，请稍后重试", err)
 	}
-	profile, err := os.MkdirTemp("", "meiye-browser-")
+	profile, err := os.MkdirTemp("", "ecv-browser-")
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (s *Service) WarmUp(ctx context.Context) {
 		s.opts.Logger.Warn("video link parser browser warm-up skipped", "error", err)
 		return
 	}
-	profile, err := os.MkdirTemp("", "meiye-browser-warm-")
+	profile, err := os.MkdirTemp("", "ecv-browser-warm-")
 	if err != nil {
 		return
 	}

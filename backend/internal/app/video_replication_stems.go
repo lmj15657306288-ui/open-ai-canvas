@@ -25,7 +25,7 @@ import (
 // 分离服务没配置或原片伴奏分离失败时退回原来的做法（模型按原片风格配音乐），不阻止生成。
 
 const (
-	// videoReplicationSeparatorEnv 是分离服务地址，如 http://audio-separator:8000；为空时不启用。
+	// videoReplicationSeparatorEnv 是分离服务地址（自行部署 audio-separator 等兼容服务后填写）；为空时不启用。
 	videoReplicationSeparatorEnv = "VIDEO_REPLICATION_SEPARATOR_URL"
 	// videoReplicationStemVersion 随分离模型或输出格式变化递增，避免复用旧结果。
 	videoReplicationStemVersion = 1

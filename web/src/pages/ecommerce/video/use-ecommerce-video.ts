@@ -31,10 +31,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import { quoteReplicationTasks } from "./replication-quote";
 import { draftImages, draftVideo, loadVideoDraft, saveVideoDraft } from "./video-draft";
 import { durationValues, estimateSegments, replicationReferenceMode, segmentSecondOptions } from "./replication-strategy";
-import { CATEGORY_TARGET, DANCE_KIND, REPLACE_KINDS, replaceKindConfig, VOICE_SLOT, type AudioChoice, type EcommerceVideoFeature, type MaterialSlot, type ReplaceKind, type ReplaceKindConfig } from "./video-kinds";
-
-/** 从作品「做同款」带进来的素材与要求（由宿主的作品/模板模块通过 location.state.workRemix 传入；没有该模块时不会出现）。 */
-export type EcommerceWorkRemix = { prompt: string; replaceMode: string; materials: { resourceId: string; category: string; name: string; width: number; height: number; durationMs: number }[] };
+import { commerceImageParameters } from "../workflow";
+import { CATEGORY_TARGET, REPLACE_KINDS, replaceKindConfig, replacementMaterialError, VOICE_SLOT, type AudioChoice, type EcommerceVideoFeature, type MaterialSlot, type ReplaceKind, type ReplaceKindConfig } from "./video-kinds";
 
 export type DraftImage = { id: string; slot: string; category: MaterialSlot["category"]; resourceId: string; name: string; previewUrl: string; progress?: number; error?: string; durationMs?: number };
 export type VideoTrim = { startMs: number; endMs: number };
@@ -147,7 +145,7 @@ export function useEcommerceVideo() {
     const userId = useUserStore((store) => store.user?.id || "");
     // 刷新 / 切换页面后恢复草稿：已上传好的素材、参考视频与填写内容（只在首次挂载时读取一次）。
     const [initialDraft] = useState(() => loadVideoDraft(userId));
-    const [feature, setFeature] = useState<EcommerceVideoFeature>(initialDraft?.feature || "replace");
+    const feature: EcommerceVideoFeature = "replace";
     const [kind, setKind] = useState<ReplaceKind>(initialDraft?.kind || "product");
     const [images, setImages] = useState<DraftImage[]>(() => draftImages(initialDraft, createClientUUID));
     const [video, setVideo] = useState<DraftVideo | null>(() => draftVideo(initialDraft));
@@ -158,6 +156,7 @@ export function useEcommerceVideo() {
     const linkAbortRef = useRef<AbortController | null>(null);
     const [notes, setNotes] = useState(initialDraft?.notes || "");
     const [subjectHint, setSubjectHint] = useState(initialDraft?.subjectHint || "");
+    const [productName, setProductName] = useState(initialDraft?.productName || "");
     const [audio, setAudio] = useState<AudioChoice>(initialDraft?.audio || "keep");
     const [faceConsent, setFaceConsent] = useState(Boolean(initialDraft?.faceConsent));
     // 精准商品 / 精准人物：勾选「保留音乐和节奏」、口播开关；所有类型共用裁剪区间，精准类型可框选替换目标。
@@ -171,13 +170,18 @@ export function useEcommerceVideo() {
     const [projects, setProjects] = useState<VideoReplicationProject[]>([]);
     const [loadingProjects, setLoadingProjects] = useState(true);
     const [publicConfig, setPublicConfig] = useState<VideoReplicationPublicConfig | null>(null);
-    const [estimate, setEstimate] = useState<{ credits: number | null; label: string }>({ credits: null, label: "" });
+    const [quoted, setEstimate] = useState<{ key: string; credits: number | null; label: string }>({ key: "", credits: null, label: "" });
+    const submitInFlight = useRef(false);
     const draftProjectRef = useRef<Promise<string> | null>(null);
 
-    const kindConfig: ReplaceKindConfig = feature === "dance" ? DANCE_KIND : replaceKindConfig(kind);
+    const kindConfig: ReplaceKindConfig = replaceKindConfig(kind);
     // 替换音频时多一个参考音色位（放在「声音」里），提交时与素材一起登记到项目。
     const rhythmUi = kindConfig.audio === "rhythm";
-    const activeSlots = useMemo(() => (rhythmUi || audio === "replace" ? [...kindConfig.slots, VOICE_SLOT] : kindConfig.slots), [audio, kindConfig.slots, rhythmUi]);
+    const activeSlots = useMemo<MaterialSlot[]>(
+        () =>
+            rhythmUi || audio === "replace" ? [...kindConfig.slots, VOICE_SLOT] : kindConfig.slots,
+        [audio, kindConfig.slots, rhythmUi],
+    );
 
     // ---------- 草稿：输入变化后写入本地，刷新后恢复 ----------
     // 挂载时用户信息还没加载好：等拿到用户 ID 后先恢复草稿，再开始写入，避免空面板覆盖已有草稿。
@@ -186,13 +190,13 @@ export function useEcommerceVideo() {
         if (!userId || draftUser === userId) return;
         const draft = loadVideoDraft(userId);
         if (draft) {
-            setFeature(draft.feature || "replace");
             setKind(draft.kind || "product");
             setImages(draftImages(draft, createClientUUID));
             setVideo(draftVideo(draft));
             setLinkText(draft.linkText || "");
             setNotes(draft.notes || "");
             setSubjectHint(draft.subjectHint || "");
+            setProductName(draft.productName || "");
             setAudio(draft.audio || "keep");
             setKeepMusic(draft.keepMusic ?? true);
             setTalking(Boolean(draft.talking));
@@ -215,6 +219,7 @@ export function useEcommerceVideo() {
                 linkText,
                 notes,
                 subjectHint,
+                productName,
                 audio,
                 keepMusic,
                 talking,
@@ -226,7 +231,7 @@ export function useEcommerceVideo() {
             });
         }, 300);
         return () => window.clearTimeout(timer);
-    }, [audio, draftUser, faceConsent, feature, images, keepMusic, kind, linkText, notes, ratio, regions, resolution, subjectHint, talking, trim, userId, video]);
+    }, [audio, draftUser, faceConsent, feature, images, keepMusic, kind, linkText, notes, productName, ratio, regions, resolution, subjectHint, talking, trim, userId, video]);
 
     // 上传或提交进行中：刷新 / 关闭标签页弹出浏览器确认，站内跳转先确认，避免把上传和提交打断。
     const uploading = Boolean(video?.uploading) || images.some((image) => !image.resourceId && !image.error) || linkBusy;
@@ -257,21 +262,26 @@ export function useEcommerceVideo() {
     // ---------- 模型：只用系统模型（服务端逐段提交），后台限定时只显示开放的模型 ----------
     useEffect(() => {
         const controller = new AbortController();
-        getVideoReplicationConfig(controller.signal)
-            .then(setPublicConfig)
-            .catch(() => undefined);
-        return () => controller.abort();
+        const refresh = () =>
+            getVideoReplicationConfig(controller.signal)
+                .then(setPublicConfig)
+                .catch(() => undefined);
+        void refresh();
+        window.addEventListener("focus", refresh);
+        return () => {
+            controller.abort();
+            window.removeEventListener("focus", refresh);
+        };
     }, []);
-    // 后台关闭的替换类型 / 跳舞复刻：当前选中的被关闭时切到第一个开放的类型。
+    // 后台关闭的替换类型：当前选中的被关闭时切到第一个开放的类型。
     const disabledKinds = publicConfig?.disabledKinds;
     useEffect(() => {
         if (!disabledKinds?.length) return;
-        if (feature === "dance" && disabledKinds.includes("dance")) setFeature("replace");
         if (disabledKinds.includes(kind)) {
             const next = REPLACE_KINDS.find((item) => !disabledKinds.includes(item.id));
             if (next) setKind(next.id);
         }
-    }, [disabledKinds, feature, kind]);
+    }, [disabledKinds, kind]);
     const adminEntryFor = useCallback(
         (model: string) => {
             if (!publicConfig?.restrictVideoModels) return null;
@@ -297,13 +307,13 @@ export function useEcommerceVideo() {
     const canGenerateAudio = Boolean(profile?.generateAudio.supported) && !(audioLocked && adminEntry && !adminEntry.generateAudio);
     const voiceSupported = referenceMode.mode === "reference" && (profile?.references.maxAudios || 0) > 0;
     // 原片编辑：模型能接收参考视频时，每段把原视频片段发给模型，只替换目标，场景与动作沿用原片。
-    const editMode = referenceMode.mode === "reference" && (profile?.references.maxVideos || 0) > 0 && feature !== "dance";
+    const editMode = referenceMode.mode === "reference" && (profile?.references.maxVideos || 0) > 0;
     const editSeconds = editMode ? Math.max(0, Math.floor(profile?.references.maxVideoDurationSeconds || 0)) : 0;
-    const maxVoiceSeconds = Math.min(15, profile?.references.maxAudioDurationSeconds || 15);
+    const maxVoiceSeconds = profile?.references.maxAudioDurationSeconds || 15;
     const maxVoiceAudios = Math.min(VOICE_SLOT.max, profile?.references.maxAudios || 0);
     const uploadedVoices = images.filter((image) => image.slot === VOICE_SLOT.key && image.category === VOICE_SLOT.category && image.resourceId).length;
-    // 精准类型的声音：勾选保留 → 原音轨；不勾选 → 有参考音色就用它说原台词，没有就让模型按新画面重新生成声音（模型不能出声时静音）。
-    const effectiveAudio: AudioChoice = !rhythmUi ? audio : keepMusic ? "keep" : uploadedVoices > 0 ? "replace" : canGenerateAudio ? "generate" : "mute";
+    // 上传参考音色时优先使用它；商品 / 服饰台词另按实际替换目标改写，保留音乐不等于保留旧商品台词。
+    const effectiveAudio: AudioChoice = !rhythmUi ? audio : uploadedVoices > 0 ? "replace" : keepMusic ? "keep" : canGenerateAudio ? "generate" : "mute";
     const setModel = useCallback(
         (value: string) => {
             updateConfig("videoModel", value);
@@ -338,12 +348,14 @@ export function useEcommerceVideo() {
     // ---------- 素材 ----------
     const slotImages = useCallback((slot: string) => images.filter((image) => image.slot === slot), [images]);
     const visibleImages = useMemo(() => images.filter((image) => activeSlots.some((slot) => slot.key === image.slot && slot.category === image.category)), [images, activeSlots]);
+    const hasProductImage = visibleImages.some((image) => image.category === "product_image" && image.resourceId && !image.error);
 
     const addImageFiles = useCallback(
         async (slot: MaterialSlot, files: File[]) => {
             const room = slot.max - images.filter((image) => image.slot === slot.key && image.category === slot.category).length;
             const audio = slot.media === "audio";
             const accepted = files.filter((file) => file.type.startsWith(audio ? "audio/" : "image/")).slice(0, Math.max(0, room));
+            let uploaded = 0;
             let usedVoiceMs = audio ? images.filter((image) => image.slot === slot.key && image.category === slot.category && !image.error).reduce((sum, image) => sum + (image.durationMs || 0), 0) : 0;
             if (files.length > accepted.length) message.warning(room <= 0 ? `${slot.label}最多 ${slot.max} ${audio ? "段" : "张"}` : audio ? "只能上传音频，超出的部分未添加" : "只能上传图片，超出的部分未添加");
             for (const file of accepted) {
@@ -371,10 +383,12 @@ export function useEcommerceVideo() {
                         setImages((current) => current.map((item) => (item.id === id ? { ...item, progress: total ? done / total : 0 } : item))),
                     );
                     setImages((current) => current.map((item) => (item.id === id ? { ...item, resourceId: resource.id, progress: undefined } : item)));
+                    uploaded++;
                 } catch (error) {
                     setImages((current) => current.map((item) => (item.id === id ? { ...item, error: errorText(error, "上传失败"), progress: undefined } : item)));
                 }
             }
+            return uploaded;
         },
         [images, maxVoiceSeconds, message],
     );
@@ -564,37 +578,49 @@ export function useEcommerceVideo() {
 
     // ---------- 预估积分 ----------
     const referenceCount = Math.min(visibleImages.filter((image) => image.resourceId && image.category !== "voice_audio").length, referenceMode.max || 0);
+    const voiceCount = effectiveAudio === "replace" ? visibleImages.filter((image) => image.category === "voice_audio" && image.resourceId).length : 0;
     const clipMs = trim ? trim.endMs - trim.startMs : video?.durationMs || 0;
-    const planSeconds = useMemo(() => estimateSegments(clipMs || 10000, segmentSeconds), [clipMs, segmentSeconds]);
+    const voiceSegmentSeconds = useMemo(() => {
+        if (!voiceCount || !editMode || editSeconds <= 0) return segmentSeconds;
+        const limit = Math.min(segmentSeconds, editSeconds - Math.max(5, Math.ceil((voiceCount * 2000 + 300) / 1000)));
+        const usable = allowedSeconds.filter((value) => value >= 4 && value <= limit);
+        return usable.length ? Math.max(...usable) : allowedSeconds.length ? 0 : Math.max(0, limit);
+    }, [allowedSeconds, editMode, editSeconds, segmentSeconds, voiceCount]);
+    const planSeconds = useMemo(() => (clipMs > 0 && voiceSegmentSeconds >= 4 ? estimateSegments(clipMs, voiceSegmentSeconds, allowedSeconds) : []), [allowedSeconds, clipMs, voiceSegmentSeconds]);
+    const quoteKey = JSON.stringify([selectedModel, ratio, resolution, planSeconds, referenceCount, referenceMode.mode, editMode, voiceCount]);
+    const estimate = creditsEnabled && quoted.key === quoteKey ? quoted : { credits: null, label: "" };
     useEffect(() => {
-        if (!creditsEnabled || !selectedModel || !profile) {
-            setEstimate({ credits: null, label: "" });
+        if (!creditsEnabled || !selectedModel || !profile || !planSeconds.length) {
             return;
         }
         const controller = new AbortController();
-        quoteReplicationTasks({ config, model: selectedModel, ratio, resolution, seconds: planSeconds, referenceCount, referenceMode: referenceMode.mode, signal: controller.signal })
+        quoteReplicationTasks({ config, model: selectedModel, ratio, resolution, seconds: planSeconds, referenceCount, referenceMode: referenceMode.mode, referenceVideo: editMode, audioCount: voiceCount, signal: controller.signal })
             .then((quote) => {
-                if (quote.credits === null) setEstimate({ credits: null, label: quote.usage ? "按实际用量结算" : "" });
-                else setEstimate({ credits: quote.credits, label: `${quote.credits.toLocaleString("zh-CN", { maximumFractionDigits: 3 })} 积分` });
+                if (controller.signal.aborted) return;
+                setEstimate({ key: quoteKey, credits: quote.credits, label: quote.usage ? "按实际用量结算" : quote.credits === null ? "暂时无法估算积分" : "" });
             })
             .catch(() => {
-                if (!controller.signal.aborted) setEstimate({ credits: null, label: "" });
+                if (!controller.signal.aborted) setEstimate({ key: quoteKey, credits: null, label: "暂时无法估算积分" });
             });
         return () => controller.abort();
-    }, [config, creditsEnabled, planSeconds, profile, ratio, referenceCount, referenceMode.mode, resolution, selectedModel]);
+    }, [config, creditsEnabled, editMode, planSeconds, profile, quoteKey, ratio, referenceCount, referenceMode.mode, resolution, selectedModel, voiceCount]);
 
     // ---------- 提交 ----------
     const targets = useMemo<VideoReplicationTarget[]>(() => {
         if (kindConfig.targets.length) return kindConfig.targets;
         return [...new Set(visibleImages.flatMap((image) => CATEGORY_TARGET[image.category] || []))];
     }, [kindConfig.targets, visibleImages]);
+    const adaptProductSpeech = targets.some((target) => target === "product" || target === "apparel");
 
     const missing = useMemo(() => {
         if (!selectedModel) return "暂无可用的视频模型";
         if (!video) return "请上传参考视频";
         if (video.uploading) return "参考视频上传中";
+        if (!clipMs) return "正在读取参考视频时长";
+        if (voiceSegmentSeconds < 4) return "模型参考时长不足，请减少音色或更换模型";
         if (visibleImages.some((image) => !image.resourceId && !image.error)) return "素材上传中";
-        if (!visibleImages.some((image) => image.resourceId && image.category !== "voice_audio")) return kindConfig.id === "combination" ? "请至少上传一类素材" : `请上传${kindConfig.slots[0].label}`;
+        const materialError = replacementMaterialError(kindConfig, visibleImages);
+        if (materialError) return materialError;
         for (const slot of kindConfig.slots) {
             if (slot.requires) continue;
             if (kindConfig.id !== "combination" && slot.note.startsWith("限") && !slotImages(slot.key).some((image) => image.category === slot.category && image.resourceId)) return `请上传${slot.label}`;
@@ -606,19 +632,40 @@ export function useEcommerceVideo() {
         if (effectiveAudio === "replace") {
             if (!canGenerateAudio) return "所选模型不能生成声音，请换模型或改选保留原声 / 静音";
             if (!voiceSupported) return "所选模型不支持参考音色，请换用支持参考音频的模型（如 Seedance 2.0）";
-            const voices = visibleImages.filter((image) => image.category === "voice_audio" && image.resourceId).length;
-            if (!voices) return "请上传至少 1 段参考音色";
-            if (rhythmUi && !voiceSupported) return "所选模型不支持参考音色，请换用 Seedance 2.0 等模型，或勾选保留参考视频的音乐";
-            if (voices > maxVoiceAudios) return `所选模型最多接收 ${maxVoiceAudios} 段参考音频，请删掉多余的参考音色`;
+            if (!voiceCount) return "请上传至少 1 段参考音色";
+            if (rhythmUi && !voiceSupported) return "所选模型不支持参考音色，请换用 Seedance 2.0 等模型，或删掉参考音色沿用原视频声音";
+            if (voiceCount > maxVoiceAudios) return `所选模型最多接收 ${maxVoiceAudios} 段参考音频，请删掉多余的参考音色`;
         }
         if (kindConfig.consent && !faceConsent) return "请确认已取得肖像授权";
         if (Array.from(notes).length > kindConfig.notesLimit) return `补充说明最多 ${kindConfig.notesLimit} 字`;
+        if (creditsEnabled && estimate.credits === null && estimate.label !== "按实际用量结算") return estimate.label || "正在估算积分";
         return "";
-    }, [canGenerateAudio, clipMs, effectiveAudio, faceConsent, kindConfig, maxVoiceAudios, notes, publicConfig?.maxReferenceSeconds, referenceMode.mode, rhythmUi, selectedModel, slotImages, video, visibleImages, voiceSupported]);
+    }, [canGenerateAudio, clipMs, creditsEnabled, effectiveAudio, estimate.credits, estimate.label, faceConsent, kindConfig, maxVoiceAudios, notes, publicConfig?.maxReferenceSeconds, referenceMode.mode, rhythmUi, selectedModel, slotImages, video, visibleImages, voiceCount, voiceSegmentSeconds, voiceSupported]);
 
     const audioMode: AudioChoice = effectiveAudio;
     // 保留原声时参考音色用不上，不登记到项目。
     const submitSlots = useMemo(() => (audioMode === "replace" ? activeSlots : activeSlots.filter((slot) => slot.key !== VOICE_SLOT.key)), [activeSlots, audioMode]);
+
+    // 元素参考图：补充要求换画面元素（梨→香蕉）时，后端给每个新元素先出一张参考图，视频模型以原片为底按图替换。
+    // 只靠文字时原片编辑会把没有参考图的元素原样保留。自动选能收参考图的系统图片模型，优先用户默认图片模型。
+    const keyframe = useMemo((): Partial<VideoReplicationParameters> => {
+        const systemImage = (model: string) => Boolean(logicalModelIDForConfig({ ...config, model })) || resolveModelChannel(config, model)?.scope === "system";
+        const models = selectableModelsByCapability(config, "image").filter(systemImage);
+        const withReference = (model: string) => (modelCapabilityConfigFor(config, model).image?.references.maxImages || 0) >= 1;
+        const model = config.imageModel && models.includes(config.imageModel) && withReference(config.imageModel) ? config.imageModel : models.find(withReference) || "";
+        const imageProfile = model ? modelCapabilityConfigFor(config, model).image : undefined;
+        if (!model || !imageProfile) return {};
+        const sizes = imageProfile.size.values.length ? imageProfile.size.values : [imageProfile.size.default];
+        const size = sizes.includes("1:1") ? "1:1" : imageProfile.size.default || sizes[0];
+        const logicalModelId = logicalModelIDForConfig({ ...config, model }) || "";
+        return {
+            keyframeModel: modelOptionName(model),
+            keyframeLogicalModelId: logicalModelId || undefined,
+            keyframeChannelId: logicalModelId ? undefined : resolveModelChannel(config, model)?.id,
+            keyframeMaxImages: imageProfile.references.maxImages,
+            keyframeParameters: commerceImageParameters(imageProfile, size, imageProfile.resolution.supported ? imageProfile.resolution.default : imageProfile.quality.default || "auto"),
+        };
+    }, [config]);
 
     const buildParameters = useCallback((): VideoReplicationParameters => {
         const logicalModelId = logicalModelIDForConfig({ ...config, model: selectedModel }) || "";
@@ -636,11 +683,13 @@ export function useEcommerceVideo() {
             resolution: normalized.resolution,
             shotSeconds: allowedSeconds,
             referenceMode: referenceMode.mode,
+            // 参考图 / 音频 / 视频数量、时长和提示词字数都按后台给所选模型配的能力，不另设上限（后端开始生成时还会按模型配置重写）。
             maxReferenceImages: referenceMode.max,
-            maxReferenceAudios: Math.min(VOICE_SLOT.max, Math.max(0, profile?.references.maxAudios || 0)),
-            maxReferenceVideos: editMode ? Math.min(10, profile?.references.maxVideos || 0) : 0,
-            maxReferenceVideoSeconds: editMode ? Math.min(60, editSeconds) : 0,
-            dance: feature === "dance",
+            maxReferenceAudios: Math.max(0, profile?.references.maxAudios || 0),
+            maxReferenceAudioSeconds: Math.max(0, profile?.references.maxAudioDurationSeconds || 0),
+            maxReferenceVideos: editMode ? Math.max(0, profile?.references.maxVideos || 0) : 0,
+            maxReferenceVideoSeconds: editMode ? editSeconds : 0,
+            promptMaxChars: Math.max(0, profile?.references.promptMaxChars || 0),
             generateAudio,
             keepOriginalAudio: audioMode === "keep",
             watermark: false,
@@ -648,17 +697,20 @@ export function useEcommerceVideo() {
             faceConsent: Boolean(kindConfig.consent && faceConsent),
             transition: "cut",
             rhythm: "跟随参考视频",
-            rewriteVoice: false,
-            replaceMode: feature === "dance" ? "model" : kindConfig.id,
+            rewriteVoice: adaptProductSpeech && audioMode !== "mute",
+            replaceMode: kindConfig.id,
             audioMode,
             subjectHint: kindConfig.subjectHint ? subjectHint.trim() : "",
+            productName: hasProductImage ? productName.trim() : "",
             trimStartMs: trim ? Math.round(trim.startMs) : 0,
             trimEndMs: trim ? Math.round(trim.endMs) : 0,
             regions: kindConfig.lock && regions?.boxes.length ? regions.boxes : [],
             regionFrameMs: kindConfig.lock && regions?.boxes.length ? Math.round(regions.frameMs) : 0,
             talking: Boolean(kindConfig.talking && talking),
+            ...(editMode ? keyframe : {}),
         };
     }, [
+        keyframe,
         canGenerateAudio,
         regions,
         talking,
@@ -667,11 +719,14 @@ export function useEcommerceVideo() {
         allowedSeconds,
         audioLocked,
         audioMode,
+        adaptProductSpeech,
         config,
         faceConsent,
+        hasProductImage,
         feature,
         kindConfig,
         profile,
+        productName,
         ratio,
         referenceMode.max,
         referenceMode.mode,
@@ -682,15 +737,17 @@ export function useEcommerceVideo() {
     ]);
 
     const generate = useCallback(async () => {
+        if (submitInFlight.current) return;
         if (missing || !video) {
             if (missing) message.warning(missing);
             return;
         }
+        submitInFlight.current = true;
         setSubmitting(true);
         setSubmittingGuard(true);
         try {
             const projectId = video.projectId || (await createVideoReplicationProject({ title: "商品视频" })).id;
-            const title = `${feature === "dance" ? "跳舞复刻" : `${kindConfig.label}替换`} · ${new Date().toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+            const title = `${kindConfig.label}替换 · ${new Date().toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
             let project = await updateVideoReplicationProject(projectId, { title, videoType: targets.join(","), prompt: notes.trim(), parameters: buildParameters() });
             // 项目里的素材与当前面板对齐：参考视频保留同一资源，图片按上传位顺序重新登记。
             for (const asset of project.assets) {
@@ -703,7 +760,7 @@ export function useEcommerceVideo() {
                     project = await addVideoReplicationAsset(projectId, { category: slot.category, resourceId: image.resourceId, name: items.length > 1 ? `${slot.label}${index + 1}` : slot.label });
                 }
             }
-            project = await startVideoReplication(projectId, { segmentSeconds, keepOriginalAudio: audioMode === "keep", estimatedCredits: estimate.credits || 0, confirmFirst: false });
+            project = await startVideoReplication(projectId, { segmentSeconds: voiceSegmentSeconds, keepOriginalAudio: audioMode === "keep", estimatedCredits: estimate.credits || 0, maxVideoTasks: planSeconds.length, confirmFirst: false });
             if (draftProjectRef.current) {
                 const draftId = await draftProjectRef.current.catch(() => "");
                 if (draftId === projectId) draftProjectRef.current = null;
@@ -719,25 +776,44 @@ export function useEcommerceVideo() {
             });
             setTrim(null);
             setRegions(null);
+            setProductName("");
             setLinkText("");
             setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
             message.success("已开始生成，AI 正在分析参考视频");
         } catch (error) {
             message.error(errorText(error, "提交失败，请稍后重试"));
         } finally {
+            submitInFlight.current = false;
             setSubmitting(false);
             setSubmittingGuard(false);
         }
-    }, [submitSlots, audioMode, buildParameters, estimate.credits, feature, kindConfig, message, missing, notes, segmentSeconds, targets, video, visibleImages]);
+    }, [submitSlots, audioMode, buildParameters, estimate.credits, feature, kindConfig, message, missing, notes, planSeconds, voiceSegmentSeconds, targets, video, visibleImages]);
 
     /** 再次生成：用项目原来的素材和参数重新分析并生成，生成新的成片版本。 */
     const regenerate = useCallback(
         async (project: VideoReplicationProject) => {
+            const segmentLimit = project.parameters.segmentSeconds || segmentSeconds;
+            const sourceMs = project.assets.find((asset) => asset.category === "reference_video" && asset.isPrimary)?.durationMs || 0;
+            const trimEnd = project.parameters.trimEndMs;
+            const durationMs = trimEnd ? Math.min(trimEnd, sourceMs || trimEnd) - (project.parameters.trimStartMs || 0) : sourceMs;
+            const maxVideoTasks = project.parameters.maxVideoTasks || (durationMs > 0 ? estimateSegments(durationMs, segmentLimit).length : 1);
+            const confirmed = await new Promise<boolean>((resolve) => {
+                modal.confirm({
+                    title: "再次生成视频？",
+                    content: `这次最多提交 ${maxVideoTasks} 次付费视频生成，按当前模型价格计费。`,
+                    okText: "再次生成",
+                    cancelText: "取消",
+                    onOk: () => resolve(true),
+                    onCancel: () => resolve(false),
+                });
+            });
+            if (!confirmed) return;
             try {
                 const next = await startVideoReplication(project.id, {
-                    segmentSeconds: project.parameters.segmentSeconds || segmentSeconds,
+                    segmentSeconds: segmentLimit,
                     keepOriginalAudio: Boolean(project.parameters.keepOriginalAudio),
                     estimatedCredits: project.parameters.autoEstimate || 0,
+                    maxVideoTasks,
                     confirmFirst: false,
                 });
                 setProjects((current) => [next, ...current.filter((item) => item.id !== next.id)]);
@@ -746,7 +822,7 @@ export function useEcommerceVideo() {
                 message.error(errorText(error, "重新生成失败"));
             }
         },
-        [message, segmentSeconds],
+        [message, modal, segmentSeconds],
     );
 
     /** 编辑：把项目的素材与参数载入左侧面板，修改后生成为新作品，原作品保留。 */
@@ -755,7 +831,6 @@ export function useEcommerceVideo() {
             const params = project.parameters;
             const mode = params.replaceMode || "product";
             const config = replaceKindConfig(mode);
-            setFeature("replace");
             setKind(config.id);
             const byCategory = new Map<string, VideoReplicationAsset[]>();
             for (const asset of [...project.assets].sort((a, b) => a.sortOrder - b.sortOrder)) byCategory.set(asset.category, [...(byCategory.get(asset.category) || []), asset]);
@@ -779,6 +854,7 @@ export function useEcommerceVideo() {
             setVideo(reference ? { resourceId: reference.resourceId, name: reference.name, previewUrl: resourceFileUrl(reference.resourceId), durationMs: reference.durationMs, width: reference.width, height: reference.height } : null);
             setNotes(project.prompt || "");
             setSubjectHint(params.subjectHint || "");
+            setProductName(params.productName || "");
             const mode2 = params.audioMode || (params.keepOriginalAudio ? "keep" : params.generateAudio ? "replace" : "mute");
             setAudio(mode2 === "generate" ? "keep" : mode2);
             setKeepMusic(mode2 === "keep");
@@ -820,6 +896,7 @@ export function useEcommerceVideo() {
         setVideo(null);
         setNotes("");
         setSubjectHint("");
+        setProductName("");
         setFaceConsent(false);
         setLinkText("");
         setTrim(null);
@@ -827,42 +904,12 @@ export function useEcommerceVideo() {
         setTalking(false);
     }, []);
 
-    const applyWorkRemix = useCallback(
-        (work: EcommerceWorkRemix) => {
-            const previous = loadVideoDraft(userId);
-            if (previous) {
-                try {
-                    window.localStorage.setItem("ecv-draft-before-remix:" + userId, JSON.stringify(previous));
-                } catch {}
-            }
-            const config = replaceKindConfig(work.replaceMode as ReplaceKind);
-            const pool = [...work.materials];
-            const next: DraftImage[] = [];
-            for (const slot of config.slots) {
-                const selected = pool.filter((item) => item.category === slot.category).slice(0, slot.max);
-                for (const item of selected) next.push({ id: createClientUUID(), slot: slot.key, category: slot.category, resourceId: item.resourceId, name: item.name, previewUrl: resourceFileUrl(item.resourceId) });
-            }
-            const reference = pool.find((item) => item.category === "reference_video");
-            setFeature("replace");
-            setKind(config.id);
-            setImages(next);
-            setVideo(reference ? { resourceId: reference.resourceId, name: reference.name, previewUrl: resourceFileUrl(reference.resourceId), width: reference.width, height: reference.height, durationMs: reference.durationMs } : null);
-            setNotes(work.prompt);
-            setLinkText("");
-            setTrim(null);
-            setRegions(null);
-            setSubjectHint("");
-            setFaceConsent(false);
-            setDraftUser(userId);
-            message.success("参考视频和图片已载入，可直接使用或替换素材");
-        },
-        [userId, message],
-    );
-
     return {
-        applyWorkRemix,
+        setSubmittingGuard,
+        profile,
+        publicConfig,
+        buildParameters,
         feature,
-        setFeature,
         kind,
         setKind,
         kindConfig,
@@ -885,6 +932,7 @@ export function useEcommerceVideo() {
         talking,
         setTalking,
         effectiveAudio,
+        adaptProductSpeech,
         uploadedVoices,
         clipMs,
         linkText,
@@ -897,6 +945,9 @@ export function useEcommerceVideo() {
         notes,
         setNotes,
         subjectHint,
+        hasProductImage,
+        productName,
+        setProductName,
         setSubjectHint,
         audio,
         setAudio,
@@ -919,6 +970,8 @@ export function useEcommerceVideo() {
         setResolution,
         resolutions,
         estimate,
+        creditsEnabled,
+        estimatedVideoTasks: planSeconds.length,
         missing,
         submitting,
         generate,

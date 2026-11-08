@@ -84,9 +84,8 @@ function stop(event: DragEvent) {
     event.stopPropagation();
 }
 
-/** 替换类型按钮：左边图标块、右边文字；点击时图标弹一下并扩散一圈光晕，悬浮显示说明卡。 */
+/** 替换类型按钮：单色图标与文字，悬浮显示说明卡。 */
 function KindButton({ id, label, pressed, onPick }: { id: ReplaceKind; label: string; pressed: boolean; onPick: () => void }) {
-    const [burst, setBurst] = useState(0);
     const detail = KIND_DETAILS[id];
     return (
         <Tooltip
@@ -106,17 +105,8 @@ function KindButton({ id, label, pressed, onPick }: { id: ReplaceKind; label: st
                 </span>
             }
         >
-            <button
-                type="button"
-                className="ecv-kind"
-                aria-pressed={pressed}
-                aria-describedby={undefined}
-                onClick={() => {
-                    setBurst((value) => value + 1);
-                    onPick();
-                }}
-            >
-                <span key={burst} className={`ecv-kind-icon is-${id}${burst ? " is-burst" : ""}`}>
+            <button type="button" className="ecv-kind" aria-pressed={pressed} aria-describedby={undefined} onClick={onPick}>
+                <span className={`ecv-kind-icon is-${id}`}>
                     <KindGlyph id={id} />
                 </span>
                 <span className="ecv-kind-label">{label}</span>
@@ -126,7 +116,23 @@ function KindButton({ id, label, pressed, onPick }: { id: ReplaceKind; label: st
 }
 
 /** 悬浮素材时在旁边弹出大图 / 自动播放的视频小窗 / 音频试听。 */
-function MediaHoverPreview({ kind, src, name, startMs, endMs, children }: { kind: "image" | "video" | "audio"; src: string; name: string; startMs?: number; endMs?: number; children: ReactNode }) {
+export function MediaHoverPreview({
+    kind,
+    src,
+    name,
+    startMs,
+    endMs,
+    showHoverPreview = true,
+    children,
+}: {
+    kind: "image" | "video" | "audio";
+    src: string;
+    name: string;
+    startMs?: number;
+    endMs?: number;
+    showHoverPreview?: boolean;
+    children: ReactNode;
+}) {
     const [open, setOpen] = useState(false);
     const [expanded, setExpanded] = useState(false);
     useEffect(() => {
@@ -137,9 +143,9 @@ function MediaHoverPreview({ kind, src, name, startMs, endMs, children }: { kind
     return (
         <>
             <Popover
-                open={open && !expanded}
+                open={showHoverPreview && open && !expanded}
                 onOpenChange={setOpen}
-                trigger={["hover"]}
+                trigger={showHoverPreview ? "hover" : []}
                 placement="rightTop"
                 mouseEnterDelay={0.25}
                 mouseLeaveDelay={0.1}
@@ -235,81 +241,50 @@ function HoverVideo({ src, startMs = 0, endMs, controls = false }: { src: string
     );
 }
 
-function FeatureSwitcher({ state }: { state: EcommerceVideoState }) {
-    const [open, setOpen] = useState(false);
-    const root = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        if (!open) return;
-        const outside = (event: PointerEvent) => {
-            if (!root.current?.contains(event.target as Node)) setOpen(false);
-        };
-        const escape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setOpen(false);
-        };
-        document.addEventListener("pointerdown", outside);
-        document.addEventListener("keydown", escape);
-        return () => {
-            document.removeEventListener("pointerdown", outside);
-            document.removeEventListener("keydown", escape);
-        };
-    }, [open]);
-    const current = FEATURES.find((item) => item.id === state.feature) || FEATURES[0];
-    const items = FEATURES.filter((item) => !state.disabledKinds.includes(item.id));
+/** 当前视频功能：本模块只提供「模特 / 商品替换」。 */
+export function FeatureSwitcher(_props: { state: EcommerceVideoState }) {
+    const current = FEATURES[0];
     return (
-        <div className="ecv-feature" ref={root} data-open={open}>
-            <button type="button" className="ecv-feature-card" aria-expanded={open} aria-haspopup="listbox" onClick={() => setOpen((value) => !value)}>
-                <span key={current.id} className={`ecv-glyph-tile is-${current.id} ecv-swap-in`}>
+        <div className="ecv-feature">
+            <div className="ecv-feature-card">
+                <span className={`ecv-glyph-tile is-${current.id}`}>
                     <FeatureGlyph id={current.id} />
                 </span>
-                <span key={`copy-${current.id}`} className="ecv-feature-copy ecv-swap-in">
+                <span className="ecv-feature-copy">
                     <small>当前视频功能</small>
                     <strong>{current.title}</strong>
                     <span>{current.description}</span>
                 </span>
-                <span className="ecv-feature-switch">
-                    切换 <ChevronDown size={13} className={open ? "is-open" : undefined} />
-                </span>
-            </button>
-            <div className="ecv-feature-menu" role="listbox" aria-label="视频功能" aria-hidden={!open} inert={!open}>
-                {items.map((item, index) => {
-                    const selected = item.id === state.feature;
-                    return (
-                        <button
-                            key={item.id}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            className={selected ? "is-selected" : undefined}
-                            style={{ "--i": index } as CSSProperties}
-                            onClick={() => {
-                                setOpen(false);
-                                state.setFeature(item.id);
-                            }}
-                        >
-                            <span className={`ecv-glyph-tile is-${item.id}`}>
-                                <FeatureGlyph id={item.id} />
-                            </span>
-                            <span className="ecv-feature-copy">
-                                <strong>{item.title}</strong>
-                                <span>{item.description}</span>
-                            </span>
-                            <span className="ecv-feature-check" aria-hidden="true">
-                                {selected ? <Check size={14} /> : null}
-                            </span>
-                        </button>
-                    );
-                })}
             </div>
         </div>
     );
 }
 
-function SlotTile({ state, slot, onLibrary, required = false, note }: { state: EcommerceVideoState; slot: MaterialSlot; onLibrary: (slot: MaterialSlot) => void; required?: boolean; note?: string }) {
+export function SlotTile({
+    state,
+    slot,
+    onLibrary,
+    required = false,
+    note,
+    renderLibrary,
+}: {
+    state: EcommerceVideoState;
+    slot: MaterialSlot;
+    onLibrary: (slot: MaterialSlot) => void;
+    required?: boolean;
+    note?: string;
+    renderLibrary?: (button: ReactNode) => ReactNode;
+}) {
     const input = useRef<HTMLInputElement>(null);
     const [dragging, setDragging] = useState(false);
     const items = state.slotImages(slot.key).filter((image) => image.category === slot.category);
     const blocked = Boolean(slot.requires && !state.slotImages(slot.requires).some((image) => image.category === slot.category));
     const full = items.length >= slot.max;
+    const libraryButton = (
+        <button type="button" className="ecv-library" disabled={blocked || (full && !renderLibrary)} onClick={() => onLibrary(slot)}>
+            <FolderOpen size={13} /> 素材库
+        </button>
+    );
     const tile = (
         <button
             type="button"
@@ -372,9 +347,7 @@ function SlotTile({ state, slot, onLibrary, required = false, note }: { state: E
                 }}
             />
             <p className={`ecv-slot-note${blocked ? " is-blocked" : ""}`}>{blocked ? slot.requiresNote : slot.note}</p>
-            <button type="button" className="ecv-library" disabled={blocked || full} onClick={() => onLibrary(slot)}>
-                <FolderOpen size={13} /> 素材库
-            </button>
+            {renderLibrary ? renderLibrary(libraryButton) : libraryButton}
             {note ? <p className="ecv-slot-note">{note}</p> : null}
         </div>
     );
@@ -386,7 +359,7 @@ function formatSeconds(ms: number) {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function ReferenceVideo({ state, onLibrary, onTrim }: { state: EcommerceVideoState; onLibrary: () => void; onTrim?: () => void }) {
+export function ReferenceVideo({ state, onLibrary, onTrim }: { state: EcommerceVideoState; onLibrary: () => void; onTrim?: () => void }) {
     const input = useRef<HTMLInputElement>(null);
     const [dragging, setDragging] = useState(false);
     const { video } = state;
@@ -523,9 +496,8 @@ function ReferenceVideo({ state, onLibrary, onTrim }: { state: EcommerceVideoSta
 
 export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }) {
     const { kindConfig } = state;
-    // 说明图默认折叠：面板加宽后把首屏让给功能控件，点标题仍可展开教学示意。
-    const [compareOpen, setCompareOpen] = useState(false);
-    const [lockOpen, setLockOpen] = useState(false);
+    const [compareOpen, setCompareOpen] = useState(true);
+    const [lockOpen, setLockOpen] = useState(true);
     const [trimOpen, setTrimOpen] = useState(false);
     const [regionOpen, setRegionOpen] = useState(false);
     const rhythm = kindConfig.audio === "rhythm";
@@ -537,29 +509,26 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
         if (overLimitKey) setTrimOpen(true);
     }, [overLimitKey]);
     const [library, setLibrary] = useState<{ slot?: MaterialSlot; video?: boolean } | null>(null);
-    const dance = state.feature === "dance";
     const canvasOptions =
         kindConfig.canvas === "ratio"
             ? state.ratios.flatMap((ratio) => state.resolutions.map((resolution) => ({ value: `${ratio}|${resolution}`, label: `${ratio} · ${resolution}` })))
             : state.resolutions.map((resolution) => ({ value: resolution, label: resolution }));
     const canvasValue = kindConfig.canvas === "ratio" ? `${state.ratio}|${state.resolution}` : state.resolution;
     const notesCount = Array.from(state.notes).length;
-    const productKind = !dance && kindConfig.targets.includes("product");
+    const productKind = kindConfig.targets.includes("product");
     const busy = state.submitting;
     const disabledReason = state.missing;
     return (
         <>
             <div className="ecs-composer-scroll ecv-scroll" data-canvas-wheel-scroll>
                 <FeatureSwitcher state={state} />
-                {!dance ? (
-                    <Section title="替换类型" hint={<span className="ecv-picked">已选择：{kindConfig.label}</span>}>
-                        <div className="ecv-kinds" role="group" aria-label="替换类型">
-                            {REPLACE_KINDS.filter((item) => !state.disabledKinds.includes(item.id)).map((item) => (
-                                <KindButton key={item.id} id={item.id} label={item.label} pressed={state.kind === item.id} onPick={() => state.setKind(item.id)} />
-                            ))}
-                        </div>
-                    </Section>
-                ) : null}
+                <Section title="替换类型" hint={<span className="ecv-picked">已选择：{kindConfig.label}</span>}>
+                    <div className="ecv-kinds" role="group" aria-label="替换类型">
+                        {REPLACE_KINDS.filter((item) => !state.disabledKinds.includes(item.id)).map((item) => (
+                            <KindButton key={item.id} id={item.id} label={item.label} pressed={state.kind === item.id} onPick={() => state.setKind(item.id)} />
+                        ))}
+                    </div>
+                </Section>
                 <Section title="素材" hint={kindConfig.materialHint}>
                     <div className="ecv-slots">
                         {kindConfig.slots.map((slot) => (
@@ -567,13 +536,19 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
                         ))}
                         {rhythm ? <SlotTile key={`${kindConfig.id}-voice`} state={state} slot={VOICE_SLOT} onLibrary={(value) => setLibrary({ slot: value })} /> : null}
                     </div>
+                    {state.hasProductImage ? (
+                        <label className="ecv-subject">
+                            <span>商品名称 <small>选填</small></span>
+                            <Input variant="filled" maxLength={60} placeholder="例如：海盐曲奇饼干" value={state.productName} onChange={(event) => state.setProductName(event.target.value)} />
+                        </label>
+                    ) : null}
                     {rhythm && state.uploadedVoices > 0 ? (
-                        <p className={`ecv-slot-note${state.keepMusic || !state.voiceSupported ? " is-blocked" : ""}`}>
-                            {state.keepMusic
-                                ? "已勾选保留参考视频的声音，参考音色不会使用；想换成这个声音请取消下方勾选"
-                                : !state.voiceSupported
-                                  ? "所选模型不支持参考音频，请换用 Seedance 2.0 等模型"
-                                  : `成片人物用这段参考音色说原视频台词（≤${state.maxVoiceSeconds} 秒）`}
+                        <p className={`ecv-slot-note${!state.voiceSupported ? " is-blocked" : ""}`}>
+                            {!state.voiceSupported
+                                ? "所选模型不支持参考音频，请换用 Seedance 2.0 等模型"
+                                : state.adaptProductSpeech
+                                  ? `用这段音色讲新商品，原有字幕同步改写（≤${state.maxVoiceSeconds} 秒）`
+                                  : `成片人物用这段参考音色说原视频台词，原视频背景音乐保留（≤${state.maxVoiceSeconds} 秒）`}
                         </p>
                     ) : null}
                     {kindConfig.lock ? (
@@ -628,15 +603,21 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
                         <label className="ecv-check ecv-check-strong">
                             <input type="checkbox" checked={state.keepMusic} onChange={(event) => state.setKeepMusic(event.target.checked)} />
                             <span>
-                                保留参考视频里的音乐和节奏，适合舞蹈、卡点、BGM 视频。
+                                {state.adaptProductSpeech ? "保留参考视频里的音乐和节奏" : "保留参考视频里的音乐和节奏，适合舞蹈、卡点、BGM 视频。"}
                                 <small>
-                                    {state.keepMusic
-                                        ? "勾选：成片直接用参考视频的原音轨，人物动作和镜头切换卡准原音乐节拍。"
+                                    {state.adaptProductSpeech
+                                        ? state.effectiveAudio === "mute"
+                                            ? "所选模型不能生成声音，成片为静音。"
+                                            : state.uploadedVoices > 0
+                                              ? "用上传音色讲新商品，原有字幕同步改写。"
+                                              : "沿用原视频音色讲新商品，原有字幕同步改写。"
                                         : state.effectiveAudio === "replace"
-                                          ? "不勾选：用你上传的参考音色重新配音，人物说原视频台词。"
-                                          : state.effectiveAudio === "generate"
-                                            ? "不勾选：AI 按新画面重新生成声音和配乐，不带原视频的声音；上传参考音色可指定人声。"
-                                            : "不勾选：所选模型不能生成声音，成片为静音。"}
+                                          ? "已上传参考音色：人物换成你的音色说原视频台词，背景音乐沿用参考视频，动作和镜头切换卡准原节拍。"
+                                          : state.keepMusic
+                                            ? "勾选：成片直接用参考视频的原音轨，人物动作和镜头切换卡准原音乐节拍。"
+                                            : state.effectiveAudio === "generate"
+                                              ? "不勾选：AI 按新画面重新生成声音和配乐，不带原视频的声音；上传参考音色可指定人声。"
+                                              : "不勾选：所选模型不能生成声音，成片为静音。"}
                                 </small>
                             </span>
                         </label>
@@ -645,7 +626,7 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
                                 <input type="checkbox" checked={state.talking} onChange={(event) => state.setTalking(event.target.checked)} />
                                 <span>
                                     是否口播视频
-                                    <small>{state.talking ? "人物面对镜头说话：AI 识别原台词，成片口型与台词同步。" : "人物不对口型说话时不用勾选（如走秀、跳舞、展示类视频）。"}</small>
+                                    <small>{state.talking ? "人物面对镜头说话：AI 识别原台词，成片口型与台词同步。" : "不勾也会自动识别：参考视频里有人对镜头说话时，成片照样对口型；走秀、展示类等无人说话的视频不受影响。"}</small>
                                 </span>
                             </label>
                         ) : null}
@@ -665,9 +646,9 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
                                 >
                                     <strong>
                                         {item.value === "replace" ? <Sparkles size={13} /> : item.value === "keep" ? <Volume2 size={13} /> : <VolumeX size={13} />}
-                                        {item.label}
+                                        {state.adaptProductSpeech && item.value === "keep" ? "沿用音色和音乐" : item.label}
                                     </strong>
-                                    <small>{item.hint}</small>
+                                    <small>{state.adaptProductSpeech && item.value !== "mute" ? (item.value === "keep" ? "用原视频音色讲新商品，原有字幕同步改写" : "用上传音色讲新商品，原有字幕同步改写") : item.hint}</small>
                                 </button>
                             ))}
                         </div>
@@ -719,7 +700,7 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
                         </label>
                     </div>
                     {kindConfig.canvas === "resolution" && state.ratio ? <p className="ecv-hint">画面比例跟随参考视频：{state.ratio}</p> : null}
-                    {state.selectedModel && !dance ? (
+                    {state.selectedModel ? (
                         state.editMode ? (
                             <p className="ecv-mode-note is-edit">原片编辑：以参考视频为底片，场景、手部动作和运镜保持原样，只替换你的商品 / 人物</p>
                         ) : (
@@ -744,15 +725,15 @@ export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }
             <footer className="ecs-footer">
                 <div className="ecs-estimate" aria-live="polite">
                     {state.estimate.credits === null ? (
-                        <strong className="is-pending">{state.estimate.label || "按实际用量结算"}</strong>
+                        <strong className="is-pending">{state.estimate.label || (state.estimatedVideoTasks > 0 && state.creditsEnabled ? "正在估算积分" : "")}</strong>
                     ) : (
                         <strong>
                             <CreditStar />
                             <RollingCreditAmount value={state.estimate.credits} maximumFractionDigits={3} />
-                            <span>积分起</span>
+                            <span>预计积分</span>
                         </strong>
                     )}
-                    <span>{disabledReason || "成片时长跟随参考视频"}</span>
+                    <span>{disabledReason || (state.estimatedVideoTasks ? `预计生成 ${state.estimatedVideoTasks} 次` : "成片时长跟随参考视频")}</span>
                 </div>
                 <Button
                     type="primary"

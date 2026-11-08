@@ -14,8 +14,8 @@ import (
 )
 
 // 语音识别「视频理解模型听写」方式（ASR mode=vision）：平台没有接入 /audio/transcriptions 转写模型、服务器也没有 whisper 时，
-// 直接用已配置的视频理解渠道（APIMart OpenAI 兼容 chat + input_audio）听写参考视频音轨，输出带时间戳的整句台词。
-// 只支持「内嵌画面 + 音轨」类型的视频理解渠道（apimart-gemini-video-text），其他渠道的音频输入格式不同，明确报错而不是静默失败。
+// 直接用已配置的视频理解渠道（OpenAI 兼容 chat + input_audio）听写参考视频音轨，输出带时间戳的整句台词。
+// 只支持「内嵌画面 + 音轨」类型的视频理解渠道（apimart-gemini-video-text、openai-gemini-multimodal），其他渠道的音频输入格式不同，明确报错而不是静默失败。
 
 const videoReplicationASRModeVision = "vision"
 
@@ -30,7 +30,7 @@ func (s *Service) videoReplicationVisionTranscriber(userID, language string) (vi
 		return nil, "视频理解模型不可用，无法听写台词：" + err.Error()
 	}
 	if !videoReplicationUsesInlineMedia(cfg) {
-		return nil, "当前视频理解渠道不支持音频听写（需要 APIMart Gemini 视频理解渠道），请改用语音识别模型或 whisper 服务"
+		return nil, "当前视频理解渠道不支持音频听写（需要 OpenAI 兼容 Gemini 多模态视频理解渠道），请改用语音识别模型或 whisper 服务"
 	}
 	cfg.TextTimeout = 4 * time.Minute
 	return func(ctx context.Context, wavPath string) ([]timelineTranscriptionSegment, string, error) {
@@ -100,24 +100,29 @@ func normalizeVideoReplicationDictation(segments []timelineTranscriptionSegment,
 
 // videoReplicationASRAudio 把转写用的 16 kHz wav 压成 mp3（体积约为 wav 的 1/5），返回 base64 与时长。
 func videoReplicationASRAudio(ctx context.Context, wavPath string) (string, int64, error) {
-	ffmpegBin, err := renderFfmpegBinary()
-	if err != nil {
-		return "", 0, err
-	}
 	info, err := os.Stat(wavPath)
 	if err != nil {
 		return "", 0, err
 	}
 	// 16 kHz 单声道 16 位 wav：去掉 44 字节文件头后每秒 32000 字节。
 	durationMs := max(0, info.Size()-44) * 1000 / 32000
-	output := filepath.Join(filepath.Dir(wavPath), "asr-dictation.mp3")
+	audio, err := encodeVideoReplicationAudio(ctx, wavPath)
+	return audio, durationMs, err
+}
+
+func encodeVideoReplicationAudio(ctx context.Context, path string) (string, error) {
+	ffmpegBin, err := renderFfmpegBinary()
+	if err != nil {
+		return "", err
+	}
+	output := filepath.Join(filepath.Dir(path), "inline-audio.mp3")
 	defer os.Remove(output)
-	if raw, err := exec.CommandContext(ctx, ffmpegBin, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", wavPath, "-ac", "1", "-ar", "16000", "-b:a", "48k", output).CombinedOutput(); err != nil {
-		return "", 0, fmt.Errorf("压缩音轨失败：%s", clipText(string(raw), 300))
+	if raw, err := exec.CommandContext(ctx, ffmpegBin, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", output).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("压缩音轨失败：%s", clipText(string(raw), 300))
 	}
 	data, err := os.ReadFile(output)
 	if err != nil {
-		return "", 0, err
+		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(data), durationMs, nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }

@@ -18,7 +18,7 @@ import (
 	"yingce/backend/internal/model"
 )
 
-// 爆款复刻分析：ffmpeg 解析参考视频 → 识图模型理解镜头 → 识图模型建立商品/模特档案 → 策划模型重构原创分镜。
+// 商品视频复刻分析：ffmpeg 解析参考视频 → 识图模型理解镜头 → 识图模型建立商品/模特档案 → 策划模型重构原创分镜。
 // 识图与策划模型复用后台为电商 Agent 配置的系统模型（同一套渠道、密钥只在服务端）；
 // 与电商 Agent 一致，分析阶段不单独计费，积分只在逐镜头视频生成时按模型报价预扣。
 
@@ -38,7 +38,7 @@ type videoReplicationFrame struct {
 	DataURL string
 }
 
-// videoReplicationTextConfig 解析分析所用的文本模型：优先使用「爆款复刻」后台指定的视频理解 / 分镜策划模型，
+// videoReplicationTextConfig 解析分析所用的文本模型：优先使用「商品视频复刻」后台指定的视频理解 / 分镜策划模型，
 // 未指定时沿用电商 Agent 的识图 / 策划模型。
 func (s *Service) videoReplicationTextConfig(userID string, vision bool) (ecommerceProviderConfig, error) {
 	// 分镜要一次写完整条分镜与口播，输出长，慢渠道上常超过 150 秒；识图输入大但输出短。
@@ -54,7 +54,7 @@ func (s *Service) videoReplicationTextConfig(userID string, vision bool) (ecomme
 		selected = replication.Vision
 	}
 	var ref EcommerceAgentModelRef
-	source := "爆款复刻后台"
+	source := "电商视频 Agent 后台"
 	if !videoReplicationRefEmpty(selected) {
 		ref = *selected
 	} else {
@@ -62,14 +62,14 @@ func (s *Service) videoReplicationTextConfig(userID string, vision bool) (ecomme
 		if err != nil {
 			return cfg, err
 		}
-		ref, source = setting.planningRef(), "电商 Agent（爆款复刻后台未单独指定）"
+		ref, source = setting.planningRef(), "电商 Agent（电商视频 Agent 后台未单独指定）"
 		if vision {
 			ref = setting.visionRef()
 		}
 	}
 	resolved, err := s.ecommerceConfiguredTextFor(userID, cfg, ref, stage)
 	if err != nil {
-		return resolved, &AppError{Status: 503, Code: 503, Message: "爆款复刻的" + stage + "模型不可用（来源：" + source + "）：" + err.Error()}
+		return resolved, &AppError{Status: 503, Code: 503, Message: "商品视频复刻的" + stage + "模型不可用（来源：" + source + "）：" + err.Error()}
 	}
 	return resolved, nil
 }
@@ -105,12 +105,19 @@ func videoReplicationTargetLabel(target string) string {
 }
 
 func (s *Service) StartVideoReplicationAnalysis(userID, projectID string) (*VideoReplicationProjectView, error) {
+	return s.startVideoReplicationAnalysis(userID, projectID, nil)
+}
+
+func (s *Service) startVideoReplicationAnalysis(userID, projectID string, startValues map[string]any) (*VideoReplicationProjectView, error) {
 	if err := s.requireVideoReplication(); err != nil {
 		return nil, err
 	}
 	project, err := s.repo.VideoReplicationProject(userID, projectID)
 	if err != nil {
 		return nil, videoReplicationNotFound(err)
+	}
+	if raw, ok := startValues["parameters_json"].(string); ok {
+		project.ParametersJSON = raw
 	}
 	assets, err := s.repo.VideoReplicationAssets(userID, projectID)
 	if err != nil {
@@ -141,18 +148,18 @@ func (s *Service) StartVideoReplicationAnalysis(userID, projectID string) (*Vide
 		return nil, err
 	}
 	lease := time.Now().Add(videoReplicationAnalysisLease).UTC().Truncate(time.Second)
-	claimed, err := s.repo.ClaimVideoReplicationAnalysis(userID, projectID, lease)
+	claimed, err := s.repo.ClaimVideoReplicationAnalysis(userID, projectID, lease, startValues)
 	if err != nil {
 		return nil, err
 	}
 	if !claimed {
 		return nil, BadAuthRequest("参考视频正在分析中")
 	}
-	go s.runVideoReplicationAnalysis(userID, projectID, lease)
+	go func() { _ = s.runVideoReplicationAnalysis(userID, projectID, lease) }()
 	return s.VideoReplicationProject(userID, projectID)
 }
 
-func (s *Service) runVideoReplicationAnalysis(userID, projectID string, lease time.Time) {
+func (s *Service) runVideoReplicationAnalysis(userID, projectID string, lease time.Time) (result error) {
 	ctx, cancel := context.WithTimeout(withVideoReplicationCostScope(context.Background(), userID, projectID), videoReplicationAnalysisTimeout)
 	defer cancel()
 	update := func(values map[string]any) {
@@ -161,6 +168,7 @@ func (s *Service) runVideoReplicationAnalysis(userID, projectID string, lease ti
 		}
 	}
 	fail := func(err error) {
+		result = err
 		slog.Warn("video replication analysis failed", "projectId", projectID, "error", err)
 		update(map[string]any{"status": model.VideoReplicationStatusFailed, "stage": "分析失败", "error": clipText(videoReplicationFriendlyError(err.Error()), 600), "analysis_lease_until": nil})
 	}
@@ -176,7 +184,7 @@ func (s *Service) runVideoReplicationAnalysis(userID, projectID string, lease ti
 		fail(ctx.Err())
 		return
 	}
-	analysis, storyboard, err := s.analyzeVideoReplication(ctx, userID, projectID, lease, func(stage string, progress int) {
+	analysis, storyboard, err := s.analyzeVideoReplicationBase(ctx, userID, projectID, lease, func(stage string, progress int) {
 		update(map[string]any{"stage": stage, "progress": progress})
 	})
 	if err != nil {
@@ -197,9 +205,10 @@ func (s *Service) runVideoReplicationAnalysis(userID, projectID string, lease ti
 	})
 	// 一键生成：分析完成后直接按分段提交生成，全部完成后由同步阶段自动合成成片。
 	s.continueVideoReplicationAuto(userID, projectID)
+	return nil
 }
 
-func (s *Service) analyzeVideoReplication(ctx context.Context, userID, projectID string, lease time.Time, progress func(string, int)) (*VideoReplicationAnalysis, *VideoReplicationStoryboard, error) {
+func (s *Service) analyzeVideoReplicationBase(ctx context.Context, userID, projectID string, lease time.Time, progress func(string, int)) (*VideoReplicationAnalysis, *VideoReplicationStoryboard, error) {
 	project, err := s.repo.VideoReplicationProject(userID, projectID)
 	if err != nil {
 		return nil, nil, err
@@ -210,6 +219,10 @@ func (s *Service) analyzeVideoReplication(ctx context.Context, userID, projectID
 	}
 	params := videoReplicationParameters(project)
 	views := videoReplicationAssetViews(assets)
+	setting, err := s.videoReplicationSetting()
+	if err != nil {
+		return nil, nil, err
+	}
 	var videos, products, models []VideoReplicationAssetView
 	for _, view := range views {
 		switch view.Category {
@@ -270,15 +283,26 @@ func (s *Service) analyzeVideoReplication(ctx context.Context, userID, projectID
 			// 框选：在原视频（裁剪前）对应时间的画面上画红框，让识图模型说出要替换的目标。
 			if videoIndex == 0 && len(params.Regions) > 0 {
 				progress("识别你框选的替换目标", 6)
+				if videoReplicationProductLocked(params) && (probe.DurationMs <= 0 || params.RegionFrameMs >= probe.DurationMs || (videoReplicationTrimmed(params) && (params.RegionFrameMs < params.TrimStartMs || params.RegionFrameMs >= params.TrimEndMs))) {
+					return BadAuthRequest("商品框选画面超出了有效视频区间，请重新框选")
+				}
 				atMs := min(params.RegionFrameMs, max(0, probe.DurationMs-100))
+				if videoReplicationProductLocked(params) {
+					atMs = params.RegionFrameMs
+				}
 				marked := filepath.Join(filepath.Dir(path), "regions.jpg")
 				if err := drawVideoReplicationRegions(ctx, ffmpegBin, path, atMs, params.Regions, marked); err != nil {
 					return err
 				}
 				if saved, err := s.saveVideoReplicationFile(userID, marked, video.Label+"-框选目标.jpg", "image", 0, 0, 0, "video-replication-regions:"+video.ID+":"+identity); err == nil {
 					analysis.RegionFrameResourceID = saved.ID
+				} else if videoReplicationProductLocked(params) {
+					return fmt.Errorf("保存商品框选定位图失败：%w", err)
 				}
-				analysis.RegionTarget = s.describeVideoReplicationRegions(ctx, visionCfg, projectID, marked, params)
+				analysis.RegionTarget, err = s.describeVideoReplicationRegions(ctx, visionCfg, projectID, marked, params)
+				if err != nil {
+					return err
+				}
 			}
 			// 裁剪：后续镜头检测、视频理解、音轨与分段都只用选定的这一段。
 			if videoIndex == 0 && videoReplicationTrimmed(params) {
@@ -299,7 +323,7 @@ func (s *Service) analyzeVideoReplication(ctx context.Context, userID, projectID
 					return err
 				}
 			}
-			if err := validateVideoReplicationDuration(probe.DurationMs); err != nil {
+			if err := validateVideoReplicationDurationLimit(probe.DurationMs, videoReplicationMaxReferenceSeconds(setting)); err != nil {
 				return err
 			}
 			item.DurationMs, item.Width, item.Height, item.FPS, item.HasAudio = probe.DurationMs, probe.Width, probe.Height, probe.FPS, probe.HasAudio
@@ -380,11 +404,10 @@ func (s *Service) analyzeVideoReplication(ctx context.Context, userID, projectID
 	if err := s.understandVideoReplicationShots(ctx, visionCfg, projectID, analysis, frames, inlineMedia, fullVideos); err != nil {
 		return nil, nil, fmt.Errorf("视频理解失败：%w", err)
 	}
-
 	// 第四步：商品与模特档案。
 	if len(products) > 0 || len(models) > 0 {
 		progress("识别上传的商品、服饰与人物形象", 58)
-		if err := s.profileVideoReplicationAssets(ctx, visionCfg, userID, projectID, analysis, products, models); err != nil {
+		if err := s.profileVideoReplicationAssets(ctx, visionCfg, userID, projectID, analysis, products, models, params.ProductName); err != nil {
 			return nil, nil, fmt.Errorf("商品/模特识别失败：%w", err)
 		}
 	}
@@ -449,6 +472,7 @@ func (s *Service) understandVideoReplicationShots(ctx context.Context, cfg ecomm
 		}
 	}
 	system := "你是资深广告片导演与分镜师。请实际观看提供的完整视频并聆听音轨，按时间顺序分析动作、运镜、场景、字幕和声音，输出严格 JSON。不识别或猜测真实人物身份。不确定的细节明确写无法判断。"
+	system += videoReplicationDeliveryAnalysisRule
 	prompt := fmt.Sprintf(`附件按 V1、V2 顺序提供完整参考视频（保留原有音轨），请完整理解时间线。以下是 ffmpeg 检测得到的镜头时间，仅用于对齐 ref；界面预览帧索引为 %s，预览帧不代替视频输入。
 镜头列表：%s
 主参考视频语音识别（带时间戳）：%s
@@ -458,6 +482,8 @@ func (s *Service) understandVideoReplicationShots(ctx context.Context, cfg ecomm
 "shots":[{"ref":"V1-S1","shotSize":"景别","camera":"运镜","scene":"场景","action":"主体动作","personAction":"人物动作与表情神态（如微笑、眨眼、看向镜头、开口说话），无人物写无","productDisplay":"商品展示方式","lighting":"光线","composition":"构图","subtitle":"画面字幕原文，没有写空串","voiceover":"这个镜头时间段内音轨里人物说出的台词原文（逐字听写，不改写、不总结；背景音乐歌词不算），没有人声写空串"}],
 "recommendation":{"camera":"推荐运镜（一句话）","rhythm":"慢节奏/正常/快速/跟随参考视频 之一","lighting":"自然光/柔光/电影光/商业棚拍 之一或组合","mood":"推荐氛围（一句话）"}}
 shots 必须包含所有镜头，按视频时间线实际观察动作、运镜、声音与字幕，不要从静态图片猜测。`, strings.Join(imageOrder, "、"), string(timingJSON), transcript)
+	prompt += `
+在 summary 中增加 delivery：{"mode":"livestream/review/explanation/unknown 之一","pace":"实际听到的快慢变化","pauses":"停顿、换气与展示时机","emphasis":"重音落点与语调变化，不抄旧优惠词","interaction":"观众互动与表情手势的配合","evidence":"原视频时间区间和可听见的判断依据"}；每个 shots 项增加 speechDelivery，描述该镜头内的局部声音表达节奏，无人声留空。`
 	var result struct {
 		Summary        VideoReplicationSummary `json:"summary"`
 		Shots          []map[string]any        `json:"shots"`
@@ -505,6 +531,7 @@ shots 必须包含所有镜头，按视频时间线实际观察动作、运镜�
 			shot.ShotSize, shot.Camera, shot.Scene, shot.Action = stringValue(detail["shotSize"]), stringValue(detail["camera"]), stringValue(detail["scene"]), stringValue(detail["action"])
 			shot.PersonAction, shot.ProductDisplay, shot.Lighting, shot.Composition = stringValue(detail["personAction"]), stringValue(detail["productDisplay"]), stringValue(detail["lighting"]), stringValue(detail["composition"])
 			shot.Subtitle, shot.Voiceover = stringValue(detail["subtitle"]), stringValue(detail["voiceover"])
+			shot.SpeechDelivery = videoReplicationClipRunes(strings.TrimSpace(stringValue(detail["speechDelivery"])), 300)
 		}
 	}
 	analysis.Summary = result.Summary
@@ -565,7 +592,7 @@ func videoReplicationRatioName(width, height int) string {
 	return best
 }
 
-func (s *Service) profileVideoReplicationAssets(ctx context.Context, cfg ecommerceProviderConfig, userID, projectID string, analysis *VideoReplicationAnalysis, products, models []VideoReplicationAssetView) error {
+func (s *Service) profileVideoReplicationAssets(ctx context.Context, cfg ecommerceProviderConfig, userID, projectID string, analysis *VideoReplicationAnalysis, products, models []VideoReplicationAssetView, productName string) error {
 	images := []string{}
 	labels := []string{}
 	add := func(items []VideoReplicationAssetView) error {
@@ -591,9 +618,12 @@ func (s *Service) profileVideoReplicationAssets(ctx context.Context, cfg ecommer
 	system := "你是电商视觉策划。只描述图片中可见的外观信息，输出严格 JSON。不识别、不猜测真实人物身份、姓名、年龄或民族。"
 	prompt := fmt.Sprintf(`附带图片依次是：%s。商品图片是同一商品的不同角度/细节/场景；服饰图片是要换穿的服装；模特图片与人脸照片是同一人物形象的参考。
 请输出 JSON：
-{"product":{"category":"品类","appearance":"整体外观","structure":"结构与形态","colors":"主色与配色","material":"材质质感","details":"必须保留的细节（logo 位置、纹理、按钮、包装文字区域等）","sellingPoints":["可视化卖点"]},
+{"product":{"category":"品类","appearance":"整体外观","structure":"结构与形态","colors":"主色与配色","material":"材质质感","details":"必须保留的细节（logo 位置、纹理、按钮、包装文字区域等）","sellingPoints":["可视化卖点"],"deliveryTone":"根据这件新商品选择自然的口语情绪、重音与停顿，例如食品的品尝分享或服饰的试穿讲解；这是表演建议，不推断功效或成分"},
 "model":{"appearance":"外观气质","hair":"发型发色","outfit":"服装","framing":"照片中呈现的身体范围（正面/侧面/半身/全身）","consistency":"生成时需保持一致的要点"}}
 没有商品图片时 product 为 null；没有模特图片时 model 为 null。`, strings.Join(labels, "、"))
+	if productName != "" && len(products) > 0 {
+		prompt += "\n" + videoReplicationProductNameRule(productName)
+	}
 	var result struct {
 		Product map[string]any `json:"product"`
 		Model   map[string]any `json:"model"`
@@ -602,6 +632,12 @@ func (s *Service) profileVideoReplicationAssets(ctx context.Context, cfg ecommer
 		return err
 	}
 	if len(products) > 0 {
+		if productName != "" {
+			if result.Product == nil {
+				result.Product = map[string]any{}
+			}
+			result.Product["name"] = productName
+		}
 		analysis.Product = result.Product
 		if raw, err := json.Marshal(result.Product); err == nil {
 			_ = s.repo.UpdateVideoReplicationAssetProfile(products[0].ID, string(raw))
@@ -643,7 +679,7 @@ func (s *Service) planVideoReplicationStoryboard(ctx context.Context, cfg ecomme
 		target = 10
 	}
 	brief := map[string]any{
-		"referenceAnalysis": analysis.Videos, "summary": analysis.Summary, "product": analysis.Product, "model": analysis.Model, "voice": analysis.Voice,
+		"referenceAnalysis": analysis.Videos, "summary": analysis.Summary, "product": analysis.Product, "productName": params.ProductName, "model": analysis.Model, "voice": analysis.Voice,
 		"videoType": videoReplicationTypeBrief(project.VideoType), "userBrief": videoReplicationReadablePrompt(project.Prompt, assets),
 		"targetSeconds": target, "allowedShotSeconds": params.ShotSeconds, "ratio": params.Ratio,
 		"preferences": map[string]string{"camera": params.Camera, "rhythm": params.Rhythm, "lighting": params.Lighting, "mood": params.Mood},

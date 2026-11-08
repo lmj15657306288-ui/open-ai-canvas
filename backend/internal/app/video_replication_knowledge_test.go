@@ -9,7 +9,7 @@ func TestVideoReplicationModelFamily(t *testing.T) {
 	cases := map[string]VideoReplicationParameters{
 		VideoReplicationKnowledgeSeedance: {Model: "doubao-seedance-2-0-mini-260128"},
 		VideoReplicationKnowledgeKling:    {Model: "kling-v4", ModelLabel: "可灵 4.0"},
-		"":                                {Model: "lec-minimax-h3-768p"},
+		"":                                {Model: "minimax-video-768p"},
 	}
 	for want, params := range cases {
 		if got := videoReplicationModelFamily(params); got != want {

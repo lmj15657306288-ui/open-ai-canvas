@@ -8,16 +8,20 @@ import (
 )
 
 func TestVideoReplicationStructureCoversApparel(t *testing.T) {
-	if !videoReplicationNeedsStructure("apparel") || !videoReplicationNeedsStructure("model,apparel") || videoReplicationNeedsStructure("face") {
+	if !videoReplicationNeedsStructure("apparel", "") || !videoReplicationNeedsStructure("model,apparel", "") || videoReplicationNeedsStructure("face", "") || !videoReplicationNeedsStructure("face", "把梨换成香蕉") || videoReplicationNeedsStructure("face", "跑鞋复刻") {
 		t.Fatal("structure alignment must run for product and apparel replacement only")
 	}
 	got := videoReplicationStructureAdaptation(VideoReplicationStructureSegment{Source: "双手插进外套侧袋", Match: "无", Action: "双手自然垂放后轻抚衣摆", Camera: "特写口袋 → 改为特写领口刺绣"})
-	for _, want := range []string{"插进外套侧袋", "轻抚衣摆", "镜头：特写口袋"} {
+	for _, want := range []string{"插进外套侧袋", "轻抚衣摆"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("adaptation %q missing %q", got, want)
 		}
 	}
-	if got := videoReplicationStructureAdaptation(VideoReplicationStructureSegment{Action: "沿用原片动作", Camera: "改为特写袖口"}); got != "镜头：改为特写袖口" {
+	// 复刻不改原片镜头：camera 不进提示词。
+	if strings.Contains(got, "镜头") {
+		t.Fatalf("adaptation must not rewrite the camera: %q", got)
+	}
+	if got := videoReplicationStructureAdaptation(VideoReplicationStructureSegment{Action: "沿用原片动作", Camera: "改为特写袖口"}); got != "" {
 		t.Fatalf("camera-only adaptation = %q", got)
 	}
 }
@@ -36,20 +40,20 @@ func TestVideoReplicationEditPromptApparelWearingAndStyling(t *testing.T) {
 		t.Fatal("a rewritten segment must not also demand the original hand actions")
 	}
 	plain := videoReplicationEditPrompt("apparel", VideoReplicationParameters{}, VideoReplicationShot{}, VideoReplicationStoryboard{}, "", references)
-	if !strings.Contains(plain, "插口袋") || !strings.Contains(plain, "手部姿势与动作") {
+	if !strings.Contains(plain, "插口袋") || !strings.Contains(plain, "人物走位与节奏") || strings.Contains(plain, "手部姿势与动作") {
 		t.Fatalf("fallback apparel prompt:\n%s", plain)
 	}
 }
 
 func TestVideoReplicationVoicePromptKeepsMusicAndLipSync(t *testing.T) {
 	references := []map[string]string{{"category": model.VideoReplicationAssetModelImage}}
-	prompt := videoReplicationWithVoicePrompt("画面", "这款外套很保暖", 1, references, videoReplicationSound{Edit: true, Music: "轻快电子乐", SpeechSegment: true})
+	prompt := videoReplicationWithVoicePrompt("画面", "这款外套很保暖", 1, references, videoReplicationSound{Edit: true, Music: "轻快电子乐", SpeechSegment: true}, videoReplicationPromptBudgetFor(VideoReplicationParameters{}))
 	for _, want := range []string{"@音频1 是画面中的人物（即@图片1中的人）", "这款外套很保暖", "口型", "轻快电子乐", "补充要求没说换音乐就不换", "滋滋声"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
-	silent := videoReplicationWithVoicePrompt("画面", "", 1, references, videoReplicationSound{SpeechSegment: true})
+	silent := videoReplicationWithVoicePrompt("画面", "", 1, references, videoReplicationSound{SpeechSegment: true}, videoReplicationPromptBudgetFor(VideoReplicationParameters{}))
 	if !strings.Contains(silent, "人物不开口") || !strings.Contains(silent, "参考音频1") {
 		t.Fatalf("segment without lines must keep the speaker silent:\n%s", silent)
 	}
@@ -88,7 +92,7 @@ func TestVideoReplicationStemsTimelineUsesNewVocalsAndOriginalMusic(t *testing.T
 }
 
 func TestVideoReplicationVoicePromptStemsAsksForVoiceOnly(t *testing.T) {
-	prompt := videoReplicationWithVoicePrompt("画面", "你好", 1, nil, videoReplicationSound{Music: "轻快电子乐", Stems: true})
+	prompt := videoReplicationWithVoicePrompt("画面", "你好", 1, nil, videoReplicationSound{Music: "轻快电子乐", Stems: true}, videoReplicationPromptBudgetFor(VideoReplicationParameters{}))
 	if !strings.Contains(prompt, "不要生成任何背景音乐") || strings.Contains(prompt, "轻快电子乐") {
 		t.Fatalf("stems prompt:\n%s", prompt)
 	}

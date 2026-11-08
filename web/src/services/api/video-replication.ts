@@ -1,7 +1,7 @@
 import { ApiError, apiBaseURL, http } from "@/services/api/request";
 import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamEvent } from "@/services/api/task-text-stream";
 
-/** 影棚视频「爆款复刻」：项目、三类素材、分析与分镜、逐镜头生成版本与成片版本。 */
+/** 电商 Agent「商品视频」模特/商品替换：项目、三类素材、分析与分镜、逐镜头生成版本与成片版本。 */
 
 export type VideoReplicationTarget = "product" | "model" | "apparel" | "face" | "background";
 /** 逗号分隔的替换目标（可为空：只按创作描述复刻）。 */
@@ -38,6 +38,7 @@ export type VideoReplicationParameters = {
     auto?: boolean;
     segmentSeconds?: number;
     autoEstimate?: number;
+    maxVideoTasks?: number;
     /** 由服务端写入：先分析、再确认生成（分析完成后停在复刻方案）。 */
     confirmFirst?: boolean;
     /** 重做口播：按你的商品改写原视频台词；关闭时沿用原台词。 */
@@ -54,15 +55,23 @@ export type VideoReplicationParameters = {
     regionFrameMs?: number;
     /** 口播视频：人物口型与原台词同步。 */
     talking?: boolean;
+    /** 元素参考图用的系统图片模型：补充要求换画面元素时，每个新元素先出一张参考图再交给视频模型。 */
+    keyframeModel?: string;
+    keyframeLogicalModelId?: string;
+    keyframeChannelId?: string;
+    keyframeMaxImages?: number;
+    keyframeParameters?: { size: string; quality?: string; imageResolution?: string; count: number };
     /** 商品替换时原视频里要被替换的商品主体（≤10 字）。 */
     subjectHint?: string;
+    productName?: string;
     /** 所选模型可接收的参考音频数；替换音频时把参考音色作为参考音频发送。 */
     maxReferenceAudios?: number;
     /** 所选模型可接收的参考视频数与单段时长；大于 0 时按「原片编辑」只替换目标。 */
     maxReferenceVideos?: number;
     maxReferenceVideoSeconds?: number;
-    /** 跳舞复刻提交。 */
-    dance?: boolean;
+    /** 以下来自所选模型在后台的能力配置：参考音频时长上限、提示词字数上限。 */
+    maxReferenceAudioSeconds?: number;
+    promptMaxChars?: number;
 };
 
 export type VideoReplicationAsset = {
@@ -152,12 +161,13 @@ export type VideoReplicationShot = {
     prompt: string;
 };
 
-export type VideoReplicationStoryboard = { shots: VideoReplicationShot[]; notes?: string };
+export type VideoReplicationStoryboard = { shots: VideoReplicationShot[]; notes?: string; voiceAdapted?: boolean; subtitlesAdapted?: boolean; subtitles?: boolean };
 
 export type VideoReplicationRun = {
     id: string;
     projectId: string;
     shotId: string;
+    kind?: string;
     version: number;
     taskId: string;
     status: VideoReplicationRunStatus;
@@ -335,7 +345,7 @@ export function deleteVideoReplicationAsset(id: string, assetId: string) {
  * 开始分析。confirmFirst 时只产出复刻方案（不调用付费视频模型），素材与要求未变时服务端直接复用已保存的分析；
  * force 丢弃已保存的分析重新理解参考视频。旧的一键项目（confirmFirst=false）分析完成后自动生成并合成。
  */
-export function startVideoReplication(id: string, input: { segmentSeconds: number; keepOriginalAudio: boolean; estimatedCredits: number; confirmFirst?: boolean; force?: boolean }) {
+export function startVideoReplication(id: string, input: { segmentSeconds: number; keepOriginalAudio: boolean; estimatedCredits: number; maxVideoTasks?: number; confirmFirst?: boolean; force?: boolean }) {
     return http.post<VideoReplicationProject>(`${base}/${encodeURIComponent(id)}/start`, input);
 }
 
@@ -455,6 +465,7 @@ export type VideoReplicationSetting = {
     vision?: VideoReplicationModelRef;
     planning?: VideoReplicationModelRef;
     videoModels: VideoReplicationVideoModel[];
+    restrictVideoModels?: boolean;
     maxReferenceSeconds?: number;
     disabledKinds?: string[];
     asr?: { mode: "env" | "model" | "vision"; model: VideoReplicationModelRef; language?: string };
@@ -481,7 +492,7 @@ export type VideoReplicationPublicConfig = {
     videoModels: VideoReplicationVideoModel[];
     restrictVideoModels: boolean;
     maxReferenceSeconds: number;
-    /** 后台关闭的替换类型（含 dance）。 */
+    /** 后台关闭的替换类型。 */
     disabledKinds?: string[];
     asrConfigured: boolean;
     ttsConfigured: boolean;

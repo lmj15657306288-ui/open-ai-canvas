@@ -510,6 +510,45 @@ export function TipScene({ scene }: { scene: string }) {
 /** 悬停上传位时出现的「注意事项」卡片。 */
 export function UploadTipCard({ kind, onDismiss, onClose }: { kind: TipKind; onDismiss: () => void; onClose: () => void }) {
     const content = TIP_CONTENT[kind];
+    const photo = { product: "product", model: "model", face: "face", background: "background" }[kind as "product" | "model" | "face" | "background"];
+    if (photo)
+        return (
+            <div className="ecv-tip ecv-photo-tip" role="dialog" aria-label={content.title}>
+                <div className="ecv-tip-actions">
+                    <button type="button" onClick={onDismiss}>
+                        不再提醒
+                    </button>
+                    <button type="button" aria-label="关闭" onClick={onClose}>
+                        ×
+                    </button>
+                </div>
+                <h4 className="ecv-tip-title">{content.title}</h4>
+                <img className="ecv-tip-photo" src={`/images/video-guides/${photo}.jpg`} width={720} height={480} loading="lazy" decoding="async" alt={`${content.title}参考示例`} />
+                <div className="ecv-photo-tip-copy">
+                    <div>
+                        <p className="ecv-tip-group is-good">
+                            <CheckCircle2 size={15} />
+                            推荐
+                        </p>
+                        {content.good.map((item) => (
+                            <p key={item.title}>
+                                <strong>{item.title}</strong>
+                                {item.note ? <small>{item.note}</small> : null}
+                            </p>
+                        ))}
+                    </div>
+                    <div>
+                        <p className="ecv-tip-group is-bad">
+                            <XCircle size={15} />
+                            不推荐
+                        </p>
+                        {content.bad.map((item) => (
+                            <p key={item.title}>{item.title}</p>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
     return (
         <div className="ecv-tip" role="dialog" aria-label={content.title}>
             <div className="ecv-tip-actions">

@@ -81,6 +81,9 @@
     display: grid;
     gap: 12px;
 }
+[data-admin-root] .vr-admin .vr-admin-add-model-label {
+    color: var(--admin-text-secondary);
+}
 [data-admin-root] .vr-admin-model {
     display: grid;
     gap: 12px;
@@ -97,6 +100,31 @@
 [data-admin-root] .vr-admin-model-picker {
     flex: 1 1 320px;
     min-width: 0;
+}
+[data-admin-root] .vr-admin-analysis-picker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+[data-admin-root] .vr-admin-analysis-grid > .vr-admin-field {
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    row-gap: var(--space-2);
+}
+@media (max-width: 720px) {
+    .vr-admin-analysis-popover .canvas-model-picker-two-pane {
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+    .vr-admin-analysis-popover .canvas-model-picker-menu.is-model-list .canvas-model-picker-brand-rail {
+        display: flex;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-right: 0;
+        padding-right: 0;
+    }
+    .vr-admin-analysis-popover .canvas-model-picker-brand-rail .canvas-model-picker-brand {
+        flex: 0 0 152px;
+    }
 }
 /* 与首页同一个模型选择器；后台行内铺满整行，高度与前台商品视频的选择器一致。 */
 [data-admin-root] .vr-admin-model-picker .creation-model-picker.canvas-composer-model-picker {

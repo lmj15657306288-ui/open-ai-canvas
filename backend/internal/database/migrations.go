@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 99
+const CurrentSchemaVersion int64 = 100
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -347,6 +347,11 @@ var schemaMigrations = []migration{
 	{version: 97, name: "canvas_unified_text_nodes", checksum: canvasNodeModelChecksum, apply: migrateCanvasNodeModel},
 	{version: 98, name: "channel_websites", checksum: "sha256:channel-websites-v98-20261110", apply: migrateChannelWebsites},
 	{version: 99, name: "api_log_generation_content", checksum: "sha256:api-log-generation-content-v99", apply: migrateAPILogGenerationContent},
+	// 100：商品视频（模特/商品替换）新版实现。本地 93 已是同名旧版迁移，上游 94–99 已占用，
+	// 故新版顺延到 100；四张表用 AutoMigrate 幂等创建，旧库已存在时只补列不重建。
+	{version: 100, name: "ecommerce_video_replication_v2", checksum: "sha256:ecommerce-video-replication-v100-20261111", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.VideoReplicationProject{}, &model.VideoReplicationAsset{}, &model.VideoReplicationShotRun{}, &model.VideoReplicationOutput{})
+	}},
 }
 
 func migrateAPILogGenerationContent(tx *gorm.DB) error {

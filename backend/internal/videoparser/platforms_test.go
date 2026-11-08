@@ -261,7 +261,7 @@ func ytdlpService(t *testing.T, m *mockUpstream, outputs map[string]string, prox
 }
 
 func TestBilibiliShortLinkSeparateStreamsAreMerged(t *testing.T) {
-	t.Setenv("CANVAS_DATABASE_URL", "postgres://user:secret-password@db/meiye")
+	t.Setenv("CANVAS_DATABASE_URL", "postgres://user:secret-password@db/app")
 	videoBytes, audioBytes := fakeMP4(4096), fakeMP4(2048)
 	if _, err := exec.LookPath("ffmpeg"); err == nil {
 		videoBytes, audioBytes = makeMedia(t, "video", 5), makeMedia(t, "audio", 5)

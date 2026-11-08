@@ -333,7 +333,7 @@ setTimeout(() => fetch('/api/detail?aweme_id=42').then(r => r.text()), 300);
 	opts := Options{
 		ChromiumPath: path,
 		ResolveHost: func(_ context.Context, host string) ([]string, error) {
-			if host == "player.meiye.test" {
+			if host == "player.example.test" {
 				return []string{"127.0.0.1"}, nil
 			}
 			return nil, errors.New("blocked by test policy")
@@ -346,7 +346,7 @@ setTimeout(() => fetch('/api/detail?aweme_id=42').then(r => r.text()), 300);
 	defer cancel()
 	var seen []string
 	var detail []byte
-	err := newChromiumCapturer(svc).Capture(ctx, "http://player.meiye.test:"+sitePort+"/", func(raw string) bool {
+	err := newChromiumCapturer(svc).Capture(ctx, "http://player.example.test:"+sitePort+"/", func(raw string) bool {
 		return strings.Contains(raw, "/api/")
 	}, func(resp capturedResponse) (bool, error) {
 		seen = append(seen, resp.URL)

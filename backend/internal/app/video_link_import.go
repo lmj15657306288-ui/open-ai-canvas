@@ -21,7 +21,7 @@ import (
 )
 
 // 参考视频链接导入：videoparser 识别平台并解析 → 下载（必要时 FFmpeg 合并音视频）→ ffprobe 校验 →
-// UploadResourceFile 转存到当前存储（平台存储即火山 TOS）→ 登记素材库素材 → 替换项目的参考视频。
+// UploadResourceFile 转存到当前存储→ 登记素材库素材 → 替换项目的参考视频。
 // 后续分析与生成只使用资源 ID（/api/resources/:id/file），不使用会过期的上游地址。
 
 const videoLinkImportTimeout = 6 * time.Minute
@@ -212,7 +212,7 @@ func (s *Service) videoLinkResource(ctx context.Context, userID string, parser *
 		send(VideoLinkEvent{Stage: "reused", Platform: meta.Platform, PlatformLabel: meta.PlatformLabel, Progress: 1, Message: "这条视频已转存过，直接使用素材库里的文件"})
 		return existing, videoReplicationProbe{Width: existing.Width, Height: existing.Height, DurationMs: existing.DurationMs}, true, nil
 	}
-	dir, err := os.MkdirTemp("", "meiye-video-link-")
+	dir, err := os.MkdirTemp("", "ecv-video-link-")
 	if err != nil {
 		return nil, videoReplicationProbe{}, false, err
 	}

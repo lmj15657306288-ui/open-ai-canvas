@@ -7,11 +7,10 @@ export const enUS: DeepStringRecord<typeof zhCN> = {
         clothing: { label: "Apparel", hint: "Upload clothing / apparel images", front: "Front view", back: "Back view", frontFirst: "Upload the front view first", compare: "Dress the person in the video in this apparel" },
         face: { label: "Face", hint: "Upload a clear headshot", slot: "Face photo" },
         background: { label: "Background", hint: "Upload the new background image", slot: "Background image" },
-        product: { label: "Product", hint: "Upload the main product image; extra angles are optional", slot: "Product image", compare: "Swap the product onto the item in the video", detailSlot: "Detail / teardown", packagingSlot: "Packaging" },
+        product: { label: "Product", hint: "Upload the main product image; extra angles are optional", slot: "Product image", compare: "Swap the product onto the item in the video", detailSlot: "Details / spec sheet", packagingSlot: "Packaging" },
         preciseProduct: { label: "Precise product", hint: "Upload product images" },
         precisePerson: { label: "Precise person" },
         combination: { label: "Combined", hint: "Upload everything you want to swap together (at least one type)" },
-        dance: { label: "Dance remake", hint: "Upload a full-body image of the dancing character", slot: "Character image" },
         voice: "Reference voice",
     },
     notes: {
@@ -44,7 +43,6 @@ export const enUS: DeepStringRecord<typeof zhCN> = {
     },
     features: {
         replace: { title: "Model / product swap", description: "Analyze a short-video link and recreate it with your subject images." },
-        dance: { description: "Use the reference video's moves and music to make your character dance." },
     },
     sharePlatforms: "Douyin / Xiaohongshu / Kuaishou / WeChat Channels",
     studio: {
@@ -56,7 +54,7 @@ export const enUS: DeepStringRecord<typeof zhCN> = {
     },
     results: {
         kind: {
-            hot: "Viral remake",
+            hot: "Video remake",
             model: "Model swap",
             clothing: "Apparel swap",
             face: "Face swap",
