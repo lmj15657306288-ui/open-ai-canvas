@@ -81,8 +81,7 @@ export function SceneSection({
     const subtitle = tool ? workbenchToolSubtitle(tool) : kind === "image" ? "不套用场景模板，直接描述想要的商品画面" : "不套用场景模板，直接描述镜头里发生什么";
     return (
         <ComposerSection
-            title="出品场景"
-            hint={tool ? undefined : "自动套用模板与素材要求"}
+            title="做什么"
             aside={
                 <Button size="small" type="text" className="wb-text-action" onClick={onOpenLibrary}>
                     全部场景
@@ -90,34 +89,36 @@ export function SceneSection({
                 </Button>
             }
         >
-            <button type="button" className="wb-scene-current" onClick={onOpenLibrary} aria-haspopup="dialog" title={tool ? `${tool.name}\n${subtitle}` : "选择出品场景"}>
-                <SceneGlyph tool={tool} kind={kind} size="lg" />
-                <span className="wb-scene-current-copy">
-                    <strong>{tool?.name || "自由创作"}</strong>
-                    <small>{subtitle}</small>
-                </span>
-                <span className="wb-scene-current-switch">更换</span>
-            </button>
+            <div className="wb-scene-grid" role="group" aria-label="创作场景">
+                <button
+                    type="button"
+                    className="wb-scene-card"
+                    aria-pressed={!tool}
+                    onClick={() => onChoose(null)}
+                >
+                    <strong>自由创作</strong>
+                    <small>自定义描述</small>
+                </button>
+                {quickTools.map((item) => (
+                    <button
+                        key={item.id}
+                        type="button"
+                        className="wb-scene-card"
+                        aria-pressed={item.id === tool?.id}
+                        onClick={() => onChoose(item.id === tool?.id ? null : item)}
+                    >
+                        <strong>{item.name}</strong>
+                        <small>{workbenchToolSubtitle(item) || "场景模板"}</small>
+                    </button>
+                ))}
+            </div>
+            {subtitle ? <p className="wb-scene-note">{subtitle}</p> : null}
             {error ? (
                 <div className="wb-inline-error" role="alert">
                     <span>{error}</span>
                     <Button size="small" onClick={onRetry}>
                         重试
                     </Button>
-                </div>
-            ) : loading ? (
-                <div className="wb-scene-chips is-loading" aria-hidden>
-                    {Array.from({ length: 4 }, (_, index) => (
-                        <span key={index} className="wb-skeleton-chip" />
-                    ))}
-                </div>
-            ) : quickTools.length ? (
-                <div className="wb-scene-chips" role="group" aria-label="常用场景">
-                    {quickTools.map((item) => (
-                        <button key={item.id} type="button" className="wb-chip" aria-pressed={item.id === tool?.id} title={workbenchToolSubtitle(item) || item.name} onClick={() => onChoose(item.id === tool?.id ? null : item)}>
-                            {item.name}
-                        </button>
-                    ))}
                 </div>
             ) : null}
         </ComposerSection>

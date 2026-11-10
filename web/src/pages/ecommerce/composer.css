@@ -14,10 +14,17 @@
     min-width: 0;
     min-height: 0;
 }
+/* 旧 workspace.css 的 .ecommerce-page 还带 12/36/24 的页面级内边距，
+   而 /toolbox 的 .wb-page 没有；切页时壳层宽度和垂直起点会各跳一次。
+   新壳层由 .ecs-shell 自己管内边距，这里归零，与工作台完全对齐。 */
+.ecs-page.ecommerce-page {
+    flex-direction: row;
+    padding: 0;
+}
 .ecs-shell {
     --ecs-motion: var(--motion-dur-base) var(--motion-ease-out);
     display: grid;
-    grid-template-columns: minmax(380px, 420px) minmax(0, 1fr);
+    grid-template-columns: var(--creation-panel-width) minmax(0, 1fr);
     gap: var(--space-4);
     width: 100%;
     height: 100%;
@@ -51,7 +58,8 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-3) 0 var(--space-4);
+    /* 与 /toolbox/image|video 的 .wb-composer-head 同一组内边距，切页时面板内容起点不跳。 */
+    padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
 }
 .ecs-kind-switch {
     display: inline-flex;
@@ -975,14 +983,9 @@
     display: none;
 }
 
-/* ---------- 窄屏 ---------- */
-@media (max-width: 1180px) {
-    .ecs-shell {
-        grid-template-columns: minmax(340px, 380px) minmax(0, 1fr);
-        gap: var(--space-3);
-    }
-}
-@media (max-width: 760px) {
+/* ---------- 窄屏 ----------
+   单列断点与 /toolbox/image|video 统一为 1023px：同一视口下三个创作页不再一个单列、一个双栏。 */
+@media (max-width: 1023px) {
     .ecs-shell {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr);
@@ -996,6 +999,8 @@
     .ecs-shell[data-mobile-view="works"] .ecs-composer {
         display: none;
     }
+}
+@media (max-width: 760px) {
     .ecs-scene-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }

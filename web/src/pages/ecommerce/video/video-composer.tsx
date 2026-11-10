@@ -523,8 +523,9 @@ function ReferenceVideo({ state, onLibrary, onTrim }: { state: EcommerceVideoSta
 
 export function EcommerceVideoComposer({ state }: { state: EcommerceVideoState }) {
     const { kindConfig } = state;
-    const [compareOpen, setCompareOpen] = useState(true);
-    const [lockOpen, setLockOpen] = useState(true);
+    // 说明图默认折叠：面板加宽后把首屏让给功能控件，点标题仍可展开教学示意。
+    const [compareOpen, setCompareOpen] = useState(false);
+    const [lockOpen, setLockOpen] = useState(false);
     const [trimOpen, setTrimOpen] = useState(false);
     const [regionOpen, setRegionOpen] = useState(false);
     const rhythm = kindConfig.audio === "rhythm";

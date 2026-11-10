@@ -133,10 +133,11 @@
 }
 
 /* ---------- 替换类型按钮 ---------- */
-/* 列宽保证「精准商品」「组合替换」等四字类型名完整显示；面板变窄或译文较长时按列数自动减少，文字最多折两行。 */
+/* 列宽保证「精准商品」「组合替换」等四字类型名完整显示；面板加宽后可排 4 列，减少一行高度。
+   面板变窄或译文较长时按列数自动减少，文字最多折两行。 */
 .ecv-shell .ecv-kinds {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 104px), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 88px), 1fr));
     gap: 8px;
 }
 .ecv-shell .ecv-kind {

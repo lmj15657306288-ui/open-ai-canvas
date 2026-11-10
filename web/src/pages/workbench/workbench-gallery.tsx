@@ -398,29 +398,32 @@ export function WorkbenchGallery({
         { outputs: 0, generating: 0, activeBatches: 0, failedBatches: 0 },
     );
     const unit = kind === "image" ? "张" : "条";
+    const done = batches.reduce((sum, batch) => sum + batch.counts.done, 0);
+    const failed = batches.reduce((sum, batch) => sum + batch.counts.failed, 0);
+    const doneText = totals.outputs ? `${done} ${unit}完成` : "";
+    const failedText = failed ? ` · ${failed} ${unit}失败` : "";
+    const filters: Array<[GalleryFilter, string]> = [["all", "全部"], ["active", "进行中"], ["done", "已完成"], ["failed", "失败"]];
+    const countsOf: Record<string, number> = { active: totals.activeBatches, done, failed };
     return (
         <section className="wb-gallery" aria-label="作品">
             <header className="wb-gallery-head">
                 <div className="wb-gallery-title">
-                    <h2>作品</h2>
+                    <h2>方案与作品</h2>
                     <span>
-                        {totals.outputs} {unit}
-                        {totals.generating ? ` · ${totals.generating} ${unit}生成中` : ""}
+                        {doneText}{failedText}
                     </span>
                 </div>
                 <div className="wb-gallery-tools">
-                    <SegmentedControl<GalleryFilter>
-                        size="sm"
-                        ariaLabel="按状态筛选"
-                        value={filter}
-                        onChange={onFilterChange}
-                        options={[
-                            { value: "all", label: "全部" },
-                            { value: "active", label: totals.activeBatches ? `进行中 ${totals.activeBatches}` : "进行中" },
-                            { value: "done", label: "已完成" },
-                            { value: "failed", label: totals.failedBatches ? `失败 ${totals.failedBatches}` : "失败" },
-                        ]}
-                    />
+                    {batches.length ? (
+                        <div className="wb-gallery-filters" role="group" aria-label="按状态筛选">
+                            {filters.map(([value, label]) => (
+                                <button type="button" key={value} aria-pressed={filter === value} onClick={() => onFilterChange(value)}>
+                                    {label}
+                                    {value !== "all" && countsOf[value] ? <span>{countsOf[value]}</span> : null}
+                                </button>
+                            ))}
+                        </div>
+                    ) : null}
                     <Input className="wb-gallery-search" size="small" allowClear prefix={<Search className="size-3.5" />} placeholder="搜索提示词或场景" aria-label="搜索作品" value={query} onChange={(event) => onQueryChange(event.target.value)} />
                     <Tooltip title="刷新">
                         <button type="button" className="wb-icon-button" data-icon-only aria-label="刷新作品列表" onClick={onRefresh}>

@@ -145,7 +145,7 @@
 .ecv-block-head h3 {
     margin: 0;
     font-size: var(--fs-ui);
-    font-weight: 650;
+    font-weight: 600;
 }
 .ecv-block-head p {
     margin: 0;
@@ -165,7 +165,8 @@
 /* ---------- 替换类型 ---------- */
 .ecv-kinds {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    /* 面板加宽后按可用宽度自动增列，减少替换类型占用的行数。 */
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
     gap: var(--space-2);
 }
 .ecv-kinds button {
@@ -882,12 +883,14 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-1);
+    /* 与 .wb-gallery-head / .commerce-output-gallery-header 对齐。 */
+    min-height: 44px;
+    padding: var(--space-1) var(--space-1) var(--space-3);
 }
 .ecv-results-head h2 {
     margin: 0;
     font-size: var(--fs-heading, 16px);
-    font-weight: 650;
+    font-weight: 600;
 }
 .ecv-results-head small {
     margin-left: 6px;
@@ -978,7 +981,8 @@
     color: rgb(255 255 255 / 50%);
 }
 /* 瀑布流以竖屏为一格、宽屏为两格：大屏最多四张竖屏或两张横屏。 */
-@container (min-width: 600px) {
+/* 左面板加宽后结果区变窄，阈值同步下调，避免作品网格从两列掉回一列。 */
+@container (min-width: 560px) {
     .ecv-results-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1131,9 +1135,6 @@
 }
 
 @media (max-width: 520px) {
-    .ecv-kinds {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
     .ecv-video-box {
         grid-template-columns: minmax(0, 1fr);
         justify-items: start;

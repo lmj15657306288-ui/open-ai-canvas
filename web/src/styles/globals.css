@@ -832,6 +832,10 @@
     --workspace-sidebar-nav-width: 250px; /* 展开态导航内容宽度 */
     --workspace-sidebar-collapsed-width: 68px; /* 折叠态保留可发现的图标菜单轨 */
 
+    /* 创作工作台共享壳层：/ecommerce 与 /toolbox/image|video 共用同一列宽，避免侧栏切页时面板左右跳动。
+       连续 clamp 代替固定 minmax，宽度随视口平滑变化，不再在断点处突变。 */
+    --creation-panel-width: clamp(360px, 36vw, 600px);
+
     --workspace-shell-gutter: 8px; /* 工作区外壳画布留白与卡片间隙（组件 token）*/
 
     --workspace-card-gap: 4px; /* 侧边栏与主区卡片之间间隙（组件 token）*/

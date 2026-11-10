@@ -48,7 +48,7 @@
 }
 .wb-shell {
     display: grid;
-    grid-template-columns: minmax(360px, 400px) minmax(0, 1fr);
+    grid-template-columns: var(--creation-panel-width) minmax(0, 1fr);
     gap: var(--space-4);
     width: 100%;
     height: 100%;
@@ -471,6 +471,55 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
+}
+.wb-scene-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+}
+.wb-scene-card {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--wb-muted);
+    color: var(--wb-ink);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--wb-motion);
+}
+.wb-scene-card:hover {
+    background: var(--wb-hover);
+}
+.wb-scene-card[aria-pressed="true"] {
+    background: var(--wb-selected-bg);
+    box-shadow: inset 0 0 0 1px var(--wb-selected-line);
+    color: var(--wb-selected-fg);
+}
+.wb-scene-card strong {
+    font-size: var(--fs-ui);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.wb-scene-card small {
+    color: var(--wb-ink-3);
+    font-size: var(--fs-label);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.wb-scene-card[aria-pressed="true"] small {
+    color: color-mix(in srgb, var(--wb-selected-fg) 75%, transparent);
+}
+.wb-scene-note {
+    margin: var(--space-2) 0 0;
+    color: var(--wb-ink-3);
+    font-size: var(--fs-caption);
+    line-height: var(--lh-body);
 }
 
 /* 素材 */
@@ -1118,6 +1167,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
+    min-height: 44px;
     padding: var(--space-1) var(--space-1) var(--space-3);
 }
 .wb-gallery-title {
@@ -1146,6 +1196,38 @@
 }
 .wb-gallery-search {
     width: 200px;
+}
+.wb-gallery-filters {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--r-lg);
+    background: var(--wb-muted);
+}
+.wb-gallery-filters button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--wb-ink-2);
+    font-size: var(--fs-caption);
+    cursor: pointer;
+}
+.wb-gallery-filters button:hover {
+    color: var(--wb-ink);
+}
+.wb-gallery-filters button[aria-pressed="true"] {
+    background: var(--wb-panel);
+    color: var(--wb-ink);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--wb-ink) 10%, transparent);
+}
+.wb-gallery-filters button span {
+    color: var(--wb-ink-2);
+    font-variant-numeric: tabular-nums;
 }
 .wb-gallery-scroll {
     flex: 1 1 auto;
@@ -1978,10 +2060,6 @@
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 1279px) {
-    .wb-shell {
-        grid-template-columns: minmax(340px, 360px) minmax(0, 1fr);
-        gap: var(--space-3);
-    }
     .wb-gallery-search {
         width: 160px;
     }
