@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 100
+const CurrentSchemaVersion int64 = 102
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -352,6 +352,11 @@ var schemaMigrations = []migration{
 	{version: 100, name: "ecommerce_video_replication_v2", checksum: "sha256:ecommerce-video-replication-v100-20261111", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.VideoReplicationProject{}, &model.VideoReplicationAsset{}, &model.VideoReplicationShotRun{}, &model.VideoReplicationOutput{})
 	}},
+	// 101/102：上游 v1.8.5 新增，原号 99/100 与本地已占用编号冲突，顺延到 101/102。
+	{version: 101, name: "site_traffic_events", checksum: "sha256:site-traffic-events-v99-20261111", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.SiteTrafficEvent{})
+	}},
+	{version: 102, name: "agent_mcp_connections", checksum: "sha256:agent-mcp-connections-v100", apply: migrateAgentMCP},
 }
 
 func migrateAPILogGenerationContent(tx *gorm.DB) error {
